@@ -1,0 +1,14 @@
+{
+  "name": "@db-optima/database",
+  "version": "0.1.0",
+  "main": "./db.ts",
+  "types": "./db.ts",
+  "dependencies": {
+    "drizzle-orm": "^0.31.4",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.6",
+    "drizzle-kit": "^0.22.8"
+  }
+}

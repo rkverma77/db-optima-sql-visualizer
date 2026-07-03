@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+.yarn/
+
+# Next.js build output
+.next/
+out/
+build/
+dist/
+
+# Environment variables (CRITICAL — contains your Gemini API key & DB URL)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+!.env.example
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Testing
+coverage/
+.vitest/
+
+# Drizzle
+drizzle/
+*.sqlite
+*.sqlite3
+*.db
+
+# Vercel
+.vercel
+
+# Docker
+docker/data/
+docker/*.log
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Misc
+.turbo/
+.eslintcache
