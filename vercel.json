@@ -3,9 +3,5 @@
   "buildCommand": "cd apps/web && npm run build",
   "outputDirectory": "apps/web/.next",
   "installCommand": "npm install",
-  "framework": "nextjs",
-  "env": {
-    "GEMINI_API_KEY": "@gemini_api_key",
-    "DATABASE_URL":   "@database_url"
-  }
+  "framework": "nextjs"
 }
