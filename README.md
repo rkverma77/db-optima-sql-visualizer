@@ -146,15 +146,4 @@ Set these environment variables in the Vercel dashboard:
 - `GEMINI_API_KEY` — your Gemini key
 - `DATABASE_URL` — (optional) Neon/Supabase PostgreSQL URL, enables Save & Share
 
----
-
-## 📋 Resume Bullet Points
-
-- **Built a real-time SQL execution visualizer** using sql.js (SQLite/WASM), animating nested-loop joins and intermediate result tables with step-by-step pipeline tracking
-- **Integrated Google Gemini 1.5 Flash** via Next.js server-side API routes (protected key, Zod-validated), grounding suggestions in real SQLite `EXPLAIN QUERY PLAN` output rather than pattern-matching alone
-- **Built a verification loop** that applies AI-suggested indexes to an in-memory SQLite database and re-measures the query plan and execution time, confirming suggestions actually change planner behavior
-- **Replaced simulated performance curves with measured benchmarks**, running queries against synthetically scaled datasets (1K–1M rows) and charting real sql.js execution time
-- **Found and fixed a duplicate-JOIN parsing bug** via a Vitest test suite covering the SQL pipeline parser and nested-loop join engine
-- **Hardened data insertion** to use parameterized statements instead of string interpolation
-- **Architected a monorepo** with shared TypeScript types and Drizzle ORM schema across `apps/` and `packages/`, with shareable query links (`/q/:id`) backed by Postgres, deployed to Vercel with one-click CI/CD
 
