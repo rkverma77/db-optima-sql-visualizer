@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { create } from "zustand";
 import { useStore } from "@/store/useStore";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
@@ -26,46 +25,7 @@ export function Header() {
     animSpeed,
     setAnimSpeed,
     runDemo,
-    visualizerSQL,
-    tableData,
-    saveStatus,
-    setSaveStatus,
-    savedQueryId,
-    setSavedQueryId,
-    saveError,
-    setSaveError,
   } = useStore();
-  const [showShare, setShowShare] = useState(false);
-
-  const handleSave = async () => {
-    setSaveStatus("saving");
-    setSaveError(null);
-    setSavedQueryId(null);
-    try {
-      const name =
-        typeof window !== "undefined"
-          ? window.prompt("Name this query:", "My query")
-          : "My query";
-      if (!name) {
-        setSaveStatus("idle");
-        return;
-      }
-      const res = await fetch("/api/queries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, sql: visualizerSQL, schemaJson: tableData }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message ?? "Save failed");
-      setSavedQueryId(data.id);
-      setSaveStatus("saved");
-      setShowShare(true);
-    } catch (e) {
-      setSaveError((e as Error).message);
-      setSaveStatus("error");
-      setShowShare(true);
-    }
-  };
 
   const statusState = isRunning ? "running" : error ? "error" : "idle";
   const statusLabel = isRunning ? "Running…" : error ? "Error" : "Idle";
@@ -90,6 +50,13 @@ export function Header() {
         </div>
         <span>
           DB<span className="text-[var(--accent)]">Optima</span>
+        </span>
+        <span
+          className="ml-1 hidden sm:inline-flex items-center gap-1 text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-full border"
+          style={{ color: "var(--success)", borderColor: "color-mix(in srgb, var(--success) 40%, transparent)", background: "color-mix(in srgb, var(--success) 8%, transparent)" }}
+          title="Every number this app shows — timings, scan types, speedups — comes from a real SQLite engine running in your browser, not a simulation or a guess."
+        >
+          ● measured, not simulated
         </span>
       </div>
 
@@ -126,14 +93,6 @@ export function Header() {
           ▶ Run Demo
         </button>
 
-        <button
-          onClick={handleSave}
-          disabled={saveStatus === "saving"}
-          className="btn-secondary text-[11px] font-semibold disabled:opacity-50"
-        >
-          {saveStatus === "saving" ? "Saving…" : "🔗 Save & Share"}
-        </button>
-
         <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
           <span>Speed</span>
           <input
@@ -152,88 +111,6 @@ export function Header() {
           <span className="text-xs text-[var(--muted)]">{statusLabel}</span>
         </div>
       </div>
-
-      {showShare && (
-        <ShareModal
-          onClose={() => setShowShare(false)}
-          id={savedQueryId}
-          error={saveError}
-        />
-      )}
     </header>
-  );
-}
-
-function ShareModal({
-  id,
-  error,
-  onClose,
-}: {
-  id: string | null;
-  error: string | null;
-  onClose: () => void;
-}) {
-  const url =
-    id && typeof window !== "undefined"
-      ? `${window.location.origin}/q/${id}`
-      : "";
-
-  return (
-    <div
-      className="fixed inset-0 flex items-center justify-center z-50 backdrop-blur-sm"
-      style={{ background: "rgba(0,0,0,0.5)" }}
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="rounded-xl p-6 w-[400px] shadow-2xl border border-[var(--border)] bg-[var(--surface2)]"
-      >
-        {error ? (
-          <div className="space-y-3">
-            <div className="text-sm font-semibold text-[var(--error)]">
-              Couldn&apos;t save
-            </div>
-            <div className="text-xs font-mono text-[var(--muted)] bg-[var(--surface3)] p-3 rounded-md">
-              {error}
-            </div>
-            <div className="text-xs text-[var(--muted)] leading-relaxed">
-              Saving requires a Postgres connection. Set{" "}
-              <code className="text-[var(--accent)]">DATABASE_URL</code> (see{" "}
-              <code className="text-[var(--accent)]">docker/docker-compose.yml</code>) and run{" "}
-              <code className="text-[var(--accent)]">npm run db:push</code>.
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="text-sm font-semibold text-[var(--success)]">
-              Saved!
-            </div>
-            <div className="text-xs text-[var(--muted)]">
-              Share this link — it reloads your exact query and schema:
-            </div>
-            <div className="flex gap-2">
-              <input
-                readOnly
-                value={url}
-                className="input flex-1 text-[11px] font-mono"
-                onFocus={(e) => e.target.select()}
-              />
-              <button
-                onClick={() => navigator.clipboard.writeText(url)}
-                className="btn-primary text-[11px] px-3"
-              >
-                Copy
-              </button>
-            </div>
-          </div>
-        )}
-        <button
-          onClick={onClose}
-          className="w-full mt-5 py-2 rounded-lg text-xs font-medium border border-[var(--border)] text-[var(--muted)] hover:bg-[var(--surface3)] transition"
-        >
-          Close
-        </button>
-      </div>
-    </div>
   );
 }

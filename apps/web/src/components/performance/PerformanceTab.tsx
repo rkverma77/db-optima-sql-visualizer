@@ -267,6 +267,14 @@ export function PerformanceTab() {
             </p>
           </div>
 
+          <div
+            className="flex items-center gap-2 text-[11px] px-3 py-1.5 rounded-full border"
+            style={{ color: "var(--success)", borderColor: "color-mix(in srgb, var(--success) 35%, transparent)", background: "color-mix(in srgb, var(--success) 8%, transparent)" }}
+          >
+            <span>●</span>
+            <span>Every number below comes from a real SQLite (WASM) engine actually running your query — not a simulation or an estimate.</span>
+          </div>
+
           <button onClick={computeBenchmarks} disabled={isComputing} className="btn-primary px-6 py-2.5 text-sm">
             {isComputing ? (
               <>
@@ -302,7 +310,7 @@ export function PerformanceTab() {
           <div className="card p-3 flex items-center justify-between bg-[var(--success)]/5 border-[var(--success)]/20 flex-shrink-0">
             <div className="flex items-center gap-2 text-sm">
               <span className="text-[var(--success)]">✓</span>
-              <span>Benchmarks computed in <strong>{computeTime?.toFixed(1)}s</strong></span>
+              <span>Benchmarks computed in <strong>{computeTime?.toFixed(1)}s</strong> — real SQLite execution, not simulated</span>
             </div>
             <div className="flex gap-2">
               <button onClick={() => exportToCSV(allBenchmarks, visualizerSQL)} className="btn-secondary text-xs px-3 py-1.5">

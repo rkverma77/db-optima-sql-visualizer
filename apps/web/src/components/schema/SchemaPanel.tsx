@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useStore } from "@/store/useStore";
 import { SAMPLE_DATASETS } from "@/lib/data/datasets";
+import { importSchemaFromSQL } from "@/lib/sql/schemaImport";
 
 export function SchemaPanel() {
   const {
@@ -13,6 +14,28 @@ export function SchemaPanel() {
   } = useStore();
 
   const newTblRef = useRef<HTMLInputElement>(null);
+  const [showSchemaImport, setShowSchemaImport] = useState(false);
+  const [ddlText, setDdlText] = useState("");
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importedNames, setImportedNames] = useState<string[] | null>(null);
+
+  const handleImportSchema = () => {
+    const result = importSchemaFromSQL(ddlText);
+    setImportErrors(result.errors);
+    if (result.tableNames.length > 0) {
+      useStore.getState().setTableData({ ...tableData, ...result.tables });
+      setImportedNames(result.tableNames);
+    } else {
+      setImportedNames(null);
+    }
+  };
+
+  const closeSchemaImport = () => {
+    setShowSchemaImport(false);
+    setDdlText("");
+    setImportErrors([]);
+    setImportedNames(null);
+  };
 
   const handleAddTable = () => {
     const name = newTblRef.current?.value.trim();
@@ -48,6 +71,7 @@ export function SchemaPanel() {
   };
 
   return (
+    <>
     <aside
       style={{ width: 264, background: "var(--surface)", borderRight: "1px solid var(--border)" }}
       className="flex flex-col flex-shrink-0 overflow-hidden"
@@ -83,6 +107,14 @@ export function SchemaPanel() {
           📂 Import CSV
           <input type="file" accept=".csv" className="hidden" onChange={handleCSV} />
         </label>
+
+        <button
+          onClick={() => setShowSchemaImport(true)}
+          className="text-center py-1 rounded text-[11px] cursor-pointer"
+          style={{ border: "1px solid var(--border2)", color: "var(--muted2)" }}
+        >
+          🧬 Import SQL Schema
+        </button>
 
         <div className="flex flex-col gap-1">
           <span className="text-[10px]" style={{ color: "var(--muted)" }}>Sample dataset:</span>
@@ -210,5 +242,124 @@ export function SchemaPanel() {
         })}
       </div>
     </aside>
+
+    {showSchemaImport && (
+      <SchemaImportModal
+        ddlText={ddlText}
+        setDdlText={setDdlText}
+        errors={importErrors}
+        importedNames={importedNames}
+        onImport={handleImportSchema}
+        onClose={closeSchemaImport}
+      />
+    )}
+    </>
+  );
+}
+
+function SchemaImportModal({
+  ddlText,
+  setDdlText,
+  errors,
+  importedNames,
+  onImport,
+  onClose,
+}: {
+  ddlText: string;
+  setDdlText: (v: string) => void;
+  errors: string[];
+  importedNames: string[] | null;
+  onImport: () => void;
+  onClose: () => void;
+}) {
+  const EXAMPLE = `CREATE TABLE customers (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT,
+  country CHAR(2)
+);
+
+CREATE TABLE orders (
+  id INTEGER PRIMARY KEY,
+  customer_id INTEGER,
+  quantity INTEGER,
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
+);`;
+
+  return (
+    <div
+      className="fixed inset-0 flex items-center justify-center z-50 backdrop-blur-sm"
+      style={{ background: "rgba(0,0,0,0.5)" }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="rounded-xl p-5 w-[520px] max-w-[90vw] shadow-2xl border"
+        style={{ background: "var(--surface2)", borderColor: "var(--border)" }}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-semibold">Import SQL Schema</h3>
+          <button
+            onClick={onClose}
+            className="text-xs px-2 py-1 rounded hover:bg-[var(--surface3)]"
+            style={{ color: "var(--muted)" }}
+          >
+            ✕
+          </button>
+        </div>
+        <p className="text-[11px] mb-3" style={{ color: "var(--muted)" }}>
+          Paste one or more <code>CREATE TABLE</code> statements from your own database.
+          Each table gets {5} generated sample rows so you can start visualizing and
+          optimizing queries against it right away.
+        </p>
+
+        <textarea
+          value={ddlText}
+          onChange={(e) => setDdlText(e.target.value)}
+          placeholder={EXAMPLE}
+          spellCheck={false}
+          className="w-full h-52 p-2.5 text-[11.5px] font-mono rounded-lg outline-none resize-none"
+          style={{ background: "var(--bg)", border: "1px solid var(--border2)", color: "var(--text)" }}
+        />
+
+        {errors.length > 0 && (
+          <div
+            className="mt-3 text-[11px] p-2.5 rounded-lg"
+            style={{ background: "color-mix(in srgb, var(--warning) 10%, transparent)", color: "var(--warning)", border: "1px solid color-mix(in srgb, var(--warning) 35%, transparent)" }}
+          >
+            {errors.map((e, i) => (
+              <div key={i}>⚠ {e}</div>
+            ))}
+          </div>
+        )}
+
+        {importedNames && importedNames.length > 0 && (
+          <div
+            className="mt-3 text-[11px] p-2.5 rounded-lg"
+            style={{ background: "color-mix(in srgb, var(--success) 10%, transparent)", color: "var(--success)", border: "1px solid color-mix(in srgb, var(--success) 35%, transparent)" }}
+          >
+            ✓ Imported {importedNames.length} table{importedNames.length === 1 ? "" : "s"}: {importedNames.join(", ")}
+          </div>
+        )}
+
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={onImport}
+            disabled={!ddlText.trim()}
+            className="flex-1 py-2 rounded-lg text-xs font-semibold text-black disabled:opacity-40"
+            style={{ background: "var(--accent)" }}
+          >
+            Parse & Import
+          </button>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-xs font-medium border"
+            style={{ borderColor: "var(--border)", color: "var(--muted)" }}
+          >
+            {importedNames ? "Done" : "Cancel"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

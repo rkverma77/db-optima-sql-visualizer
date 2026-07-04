@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { useStore } from "@/store/useStore";
 import { buildSchemaString } from "@/lib/sql/engine";
 import { explainQueryPlan, verifyIndexImpact } from "@/lib/sql/runner";
+import { generateSyntheticData } from "@/lib/data/datasets";
 import { OptimizerResult } from "./OptimizerResult";
 import { highlightSQL } from "@/lib/sql/engine";
 import { SQLEditor } from "@/components/ui/SQLEditor";
@@ -20,6 +21,7 @@ export function OptimizerTab() {
     setAiError,
     tableData,
     demoTrigger,
+    dataVolume,
     verifyResult,
     setVerifyResult,
     verifyLoading,
@@ -33,6 +35,18 @@ export function OptimizerTab() {
   // analyzed, so it stays put (for comparison against the AI's suggestions)
   // even if the user keeps editing the query above afterwards.
   const [submittedSQL, setSubmittedSQL] = useState<string | null>(null);
+
+  // The right panel scrolls independently and Detected Issues / Optimized SQL
+  // / Suggested Indexes above can already fill more than a screen's height —
+  // so a newly-appended Verification Results card can render completely out
+  // of view with zero visible feedback that the button did anything. Scroll
+  // it into view whenever a result (or error) comes back.
+  const verifySectionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (verifyResult || verifyError) {
+      verifySectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [verifyResult, verifyError]);
 
   // ── Run AI Analysis ──
   const runOptimize = useCallback(async () => {
@@ -81,14 +95,21 @@ export function OptimizerTab() {
     setVerifyError(null);
 
     try {
-      const result = await verifyIndexImpact(aiSQL, tableData, aiResult.index_statements);
+      // The raw schema sample tables are only a handful of rows (3-5) —
+      // an indexed vs. sequential scan over that few rows takes the same
+      // sub-millisecond time either way, so verifying against them directly
+      // produces a "no significant improvement" result no matter what,
+      // which reads as the button not doing anything. Scale up to the same
+      // volume used on the Performance tab so the difference is measurable.
+      const scaled = generateSyntheticData(tableData, Math.max(dataVolume, 5_000));
+      const result = await verifyIndexImpact(aiSQL, scaled, aiResult.index_statements);
       setVerifyResult(result);
     } catch (e) {
       setVerifyError((e as Error).message);
     } finally {
       setVerifyLoading(false);
     }
-  }, [aiResult, aiSQL, tableData, verifyLoading, setVerifyLoading, setVerifyError, setVerifyResult]);
+  }, [aiResult, aiSQL, tableData, dataVolume, verifyLoading, setVerifyLoading, setVerifyError, setVerifyResult]);
 
   // ── Demo auto-run ──
   useEffect(() => {
@@ -201,14 +222,19 @@ export function OptimizerTab() {
         {aiResult && (
           <>
             <div className="card p-4">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-1">
                 <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)]">
                   AI Optimization Results
                 </h3>
                 <button
                   onClick={runVerify}
                   disabled={verifyLoading || !aiResult.index_statements?.length}
-                  className="btn-secondary"
+                  title={
+                    !aiResult.index_statements?.length
+                      ? "No index suggestions to verify for this query"
+                      : "Runs this query against a real SQLite database twice — once as-is, once with the suggested indexes applied — and measures the actual execution time difference."
+                  }
+                  className="btn-secondary disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {verifyLoading ? (
                     <>
@@ -223,55 +249,60 @@ export function OptimizerTab() {
                   )}
                 </button>
               </div>
+              <p className="text-[10.5px] text-[var(--muted)] mb-4">
+                Measures real execution time before vs. after applying the suggested indexes — result appears below.
+              </p>
 
               <OptimizerResult result={aiResult} />
             </div>
 
             {/* Verify Results */}
-            {verifyError && (
-              <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-                ⚠ {verifyError}
-              </div>
-            )}
+            <div ref={verifySectionRef} className="flex flex-col gap-4">
+              {verifyError && (
+                <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                  ⚠ {verifyError}
+                </div>
+              )}
 
-            {verifyResult && (
-              <div className="card p-4 animate-fade-in">
-                <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)] mb-4">
-                  Verification Results
-                </h3>
+              {verifyResult && (
+                <div className="card p-4 animate-fade-in">
+                  <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)] mb-4">
+                    Verification Results
+                  </h3>
 
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div className="p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)]">
-                    <p className="text-xs text-[var(--muted)] mb-1">Before (no indexes)</p>
-                    <p className="text-lg font-bold">{verifyResult.beforeMs.toFixed(2)}<span className="text-sm font-normal text-[var(--muted)] ml-1">ms</span></p>
-                    <p className="text-xs text-[var(--muted)] mt-1">{verifyResult.before.summary}</p>
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div className="p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)]">
+                      <p className="text-xs text-[var(--muted)] mb-1">Before (no indexes)</p>
+                      <p className="text-lg font-bold">{verifyResult.beforeMs.toFixed(2)}<span className="text-sm font-normal text-[var(--muted)] ml-1">ms</span></p>
+                      <p className="text-xs text-[var(--muted)] mt-1">{verifyResult.before.summary}</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-[var(--success)]/5 border border-[var(--success)]/30">
+                      <p className="text-xs text-[var(--success)] mb-1">After (with indexes)</p>
+                      <p className="text-lg font-bold text-[var(--success)]">{verifyResult.afterMs.toFixed(2)}<span className="text-sm font-normal ml-1">ms</span></p>
+                      <p className="text-xs text-[var(--success)]/70 mt-1">{verifyResult.after.summary}</p>
+                    </div>
                   </div>
-                  <div className="p-3 rounded-lg bg-[var(--success)]/5 border border-[var(--success)]/30">
-                    <p className="text-xs text-[var(--success)] mb-1">After (with indexes)</p>
-                    <p className="text-lg font-bold text-[var(--success)]">{verifyResult.afterMs.toFixed(2)}<span className="text-sm font-normal ml-1">ms</span></p>
-                    <p className="text-xs text-[var(--success)]/70 mt-1">{verifyResult.after.summary}</p>
+
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)]">
+                    <span className="text-2xl">
+                      {verifyResult.afterMs < verifyResult.beforeMs ? "🚀" : "⚠️"}
+                    </span>
+                    <div>
+                      <p className="text-sm font-medium">
+                        {verifyResult.afterMs < verifyResult.beforeMs
+                          ? `Speedup: ${(verifyResult.beforeMs / verifyResult.afterMs).toFixed(2)}× faster`
+                          : "No significant improvement — indexes may not cover this query"}
+                      </p>
+                      <p className="text-xs text-[var(--muted)]">
+                        {verifyResult.after.usesIndex
+                          ? "Planner switched to index scan"
+                          : "Planner still using sequential scan"}
+                      </p>
+                    </div>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)]">
-                  <span className="text-2xl">
-                    {verifyResult.afterMs < verifyResult.beforeMs ? "🚀" : "⚠️"}
-                  </span>
-                  <div>
-                    <p className="text-sm font-medium">
-                      {verifyResult.afterMs < verifyResult.beforeMs
-                        ? `Speedup: ${(verifyResult.beforeMs / verifyResult.afterMs).toFixed(2)}× faster`
-                        : "No significant improvement — indexes may not cover this query"}
-                    </p>
-                    <p className="text-xs text-[var(--muted)]">
-                      {verifyResult.after.usesIndex
-                        ? "Planner switched to index scan"
-                        : "Planner still using sequential scan"}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </>
         )}
       </div>
