@@ -12,7 +12,7 @@ A production-ready full-stack monorepo that visualizes SQL execution step-by-ste
 | **State** | Zustand |
 | **SQL Engine** | sql.js (SQLite/WASM — fully client-side, parameterized queries) |
 | **Visualization** | Recharts (performance chart) |
-| **AI** | Google Gemini 1.5 Flash via `@google/generative-ai`, grounded in real `EXPLAIN QUERY PLAN` output |
+| **AI** | Google Gemini 2.5 Flash via `@google/generative-ai`, grounded in real `EXPLAIN QUERY PLAN` output |
 | **Validation** | Zod (API request/response schemas) |
 | **Database ORM** | Drizzle ORM + PostgreSQL (saved/shareable queries) |
 | **Testing** | Vitest (parser, join engine, synthetic-data generator) |
@@ -145,5 +145,3 @@ vercel --prod
 Set these environment variables in the Vercel dashboard:
 - `GEMINI_API_KEY` — your Gemini key
 - `DATABASE_URL` — (optional) Neon/Supabase PostgreSQL URL, enables Save & Share
-
-

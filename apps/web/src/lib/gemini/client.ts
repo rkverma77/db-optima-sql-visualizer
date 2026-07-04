@@ -3,7 +3,7 @@ import type { OptimizationResult } from "@/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-const MODEL = "gemini-2.5-flash"; // FIXED: was gemini-2.5-flash (doesn't exist)
+const MODEL = "gemini-2.5-flash"; // confirmed current stable model string (ai.google.dev/gemini-api/docs/models)
 
 export function getModel() {
   return genAI.getGenerativeModel({ model: MODEL });
