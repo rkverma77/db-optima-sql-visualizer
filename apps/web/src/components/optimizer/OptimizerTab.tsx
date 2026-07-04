@@ -120,12 +120,13 @@ export function OptimizerTab() {
   }, [demoTrigger, aiResult, aiLoading, runOptimize]);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 h-full">
       {/* ── Left: Editor + Controls ── */}
-      <div className="flex flex-col gap-4">
-        <div className="card p-4">
+      <div className="flex flex-col gap-5">
+        <div className="card card-accent-blue p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)]">
+            <h3 className="panel-heading">
+              <span className="panel-dot" style={{ background: "var(--accent)" }} />
               Query to Optimize
             </h3>
             <button
@@ -179,8 +180,9 @@ export function OptimizerTab() {
             not a live mirror of the editor above. Only shown once there's
             something to compare against. */}
         {submittedSQL !== null && (
-          <div className="card p-4">
-            <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)] mb-3">
+          <div className="card card-accent-blue p-4">
+            <h3 className="panel-heading mb-3">
+              <span className="panel-dot" style={{ background: "var(--accent)" }} />
               Original Query
               <span className="ml-2 normal-case font-normal text-[10px] text-[var(--muted)]/70">
                 (as submitted — edit above and re-run to update)
@@ -194,11 +196,11 @@ export function OptimizerTab() {
       </div>
 
       {/* ── Right: Results ── */}
-      <div className="flex flex-col gap-4 overflow-auto">
+      <div className="flex flex-col gap-5 overflow-auto">
         {!aiResult && !aiLoading && !aiError && (
-          <div className="card p-8 flex flex-col items-center justify-center text-center min-h-[300px]">
-            <div className="w-16 h-16 rounded-full bg-[var(--surface3)] flex items-center justify-center mb-4">
-              <svg className="w-8 h-8 text-[var(--muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="card card-accent-violet p-8 flex flex-col items-center justify-center text-center min-h-[300px]">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ background: "var(--accent-violet-soft)", border: "1px solid color-mix(in srgb, var(--accent-violet) 35%, transparent)" }}>
+              <svg className="w-8 h-8 text-[var(--accent-violet)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
@@ -210,10 +212,10 @@ export function OptimizerTab() {
         )}
 
         {aiLoading && !aiResult && (
-          <div className="card p-8 flex flex-col items-center justify-center min-h-[300px]">
+          <div className="card card-accent-violet p-8 flex flex-col items-center justify-center min-h-[300px]">
             <div className="relative w-12 h-12 mb-4">
               <div className="absolute inset-0 rounded-full border-2 border-[var(--border)]" />
-              <div className="absolute inset-0 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" />
+              <div className="absolute inset-0 rounded-full border-2 border-[var(--accent-violet)] border-t-transparent animate-spin" />
             </div>
             <p className="text-sm text-[var(--muted)] animate-pulse">Gemini is analyzing your query…</p>
           </div>
@@ -221,9 +223,10 @@ export function OptimizerTab() {
 
         {aiResult && (
           <>
-            <div className="card p-4">
+            <div className="card card-accent-violet p-4">
               <div className="flex items-center justify-between mb-1">
-                <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)]">
+                <h3 className="panel-heading">
+                  <span className="panel-dot" style={{ background: "var(--accent-violet)" }} />
                   AI Optimization Results
                 </h3>
                 <button
@@ -257,7 +260,7 @@ export function OptimizerTab() {
             </div>
 
             {/* Verify Results */}
-            <div ref={verifySectionRef} className="flex flex-col gap-4">
+            <div ref={verifySectionRef} className="flex flex-col gap-5">
               {verifyError && (
                 <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
                   ⚠ {verifyError}
@@ -265,8 +268,9 @@ export function OptimizerTab() {
               )}
 
               {verifyResult && (
-                <div className="card p-4 animate-fade-in">
-                  <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)] mb-4">
+                <div className="card card-accent-success p-4 animate-fade-in">
+                  <h3 className="panel-heading mb-4">
+                    <span className="panel-dot" style={{ background: "var(--success)" }} />
                     Verification Results
                   </h3>
 

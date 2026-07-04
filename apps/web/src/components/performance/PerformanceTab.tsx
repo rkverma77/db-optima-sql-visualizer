@@ -253,7 +253,7 @@ export function PerformanceTab() {
     <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5 min-h-0 pb-20">
       {/* ── Compute Button / Status ── */}
       {!hasComputed && (
-        <div className="card p-6 flex flex-col items-center justify-center text-center gap-4 min-h-[300px]">
+        <div className="card card-accent-amber p-6 flex flex-col items-center justify-center text-center gap-4 min-h-[300px]">
           <div className="w-16 h-16 rounded-full bg-[var(--surface3)] flex items-center justify-center">
             <svg className="w-8 h-8 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -307,7 +307,7 @@ export function PerformanceTab() {
       {hasComputed && (
         <div className="flex flex-col gap-5">
           {/* Success banner */}
-          <div className="card p-3 flex items-center justify-between bg-[var(--success)]/5 border-[var(--success)]/20 flex-shrink-0">
+          <div className="card card-accent-success p-3 flex items-center justify-between bg-[var(--success)]/5 border-[var(--success)]/20 flex-shrink-0">
             <div className="flex items-center gap-2 text-sm">
               <span className="text-[var(--success)]">✓</span>
               <span>Benchmarks computed in <strong>{computeTime?.toFixed(1)}s</strong> — real SQLite execution, not simulated</span>

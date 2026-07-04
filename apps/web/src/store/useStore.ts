@@ -31,6 +31,7 @@ interface AppState {
   addRow: (table: string) => void;
   dropRow: (table: string, index: number) => void;
   addColumn: (table: string) => void;
+  dropColumn: (table: string, col: string) => void;
   updateCell: (table: string, row: number, col: string, value: string | number | null) => void;
   renameColumn: (table: string, oldName: string, newName: string) => void;
 
@@ -122,6 +123,24 @@ export const useStore = create<AppState>((set) => ({
         tableData: {
           ...s.tableData,
           [table]: rows.map((r) => ({ ...r, [colName]: null })),
+        },
+      };
+    }),
+
+  dropColumn: (table, col) =>
+    set((s) => {
+      const rows = s.tableData[table];
+      // Guard against leaving a table with zero columns — nothing left to
+      // render or query against.
+      if (!rows.length || Object.keys(rows[0]).length <= 1) return s;
+      return {
+        tableData: {
+          ...s.tableData,
+          [table]: rows.map((r) => {
+            const n = { ...r };
+            delete n[col];
+            return n;
+          }),
         },
       };
     }),

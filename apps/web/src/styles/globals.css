@@ -2,39 +2,107 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Theme Tokens ───────────────────────────────────────────── */
-:root {
-  --surface: #0f172a;
-  --surface2: #1e293b;
-  --surface3: #0b1221;
-  --text: #f8fafc;
-  --text-secondary: #cbd5e1;
-  --muted: #94a3b8;
-  --accent: #38bdf8;
-  --accent-hover: #0ea5e9;
-  --success: #4ade80;
-  --warning: #fbbf24;
-  --error: #f87171;
-  --border: #334155;
-  --border-subtle: #1e293b;
-  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+/* ── Theme Tokens ───────────────────────────────────────────────────────
+   `--bg` is the canvas the whole app sits on. `--surface` / `--surface2` /
+   `--surface3` are progressively "raised" panel layers — keeping `--bg`
+   visibly darker (or lighter, in light mode) than every panel is what makes
+   boxes actually read as separate objects instead of one flat sheet.       */
+
+   :root {
+  /* Backgrounds */
+  --bg: #0a0a0a;
+  --surface: #111111;
+  --surface2: #171717;
+  --surface3: #1c1c1c;
+
+  /* Typography */
+  --text: #fafafa;
+  --text-secondary: #d4d4d4;
+  --muted: #a1a1aa;
+  --muted2: #737373;
+
+  /* Accent (Soft Emerald) */
+  --accent: #10b981;
+  --accent-hover: #059669;
+  --accent-soft: rgba(16, 185, 129, 0.12);
+
+  /* Supporting Colors */
+  --success: #22c55e;
+  --warning: #b45309;
+  --warning-soft: rgba(180, 83, 9, 0.12);
+  --error: #ef4444;
+  --error-soft: rgba(239, 68, 68, 0.12);
+
+  /* Borders */
+  --border: #2a2a2a;
+  --border2: #363636;
+  --border-subtle: #202020;
+
+  /* Shadows */
+  --shadow:
+    0 1px 2px rgba(0,0,0,.45),
+    0 10px 24px rgba(0,0,0,.35);
+
+  --shadow-lg:
+    0 8px 32px rgba(0,0,0,.45);
+
+  --shadow-inset:
+    inset 0 1px 0 rgba(255,255,255,.03);
+
+  /* Radius */
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-sm: 7px;
 }
 
 :root[data-theme="light"] {
-  --surface: #ffffff;
-  --surface2: #f8fafc;
-  --surface3: #f1f5f9;
-  --text: #0f172a;
-  --text-secondary: #334155;
-  --muted: #64748b;
-  --accent: #0284c7;
-  --accent-hover: #0369a1;
-  --success: #16a34a;
-  --warning: #d97706;
-  --error: #dc2626;
-  --border: #e2e8f0;
-  --border-subtle: #f1f5f9;
-  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  /* Backgrounds */
+  --bg: #e9edf3;
+  --surface: #f8fafc;
+  --surface2: #eef2f7;
+  --surface3: #e6ebf2;
+
+  /* Typography */
+  --text: #151b26;
+  --text-secondary: #384152;
+  --muted: #5f6b7a;
+  --muted2: #7a8798;
+
+  /* Primary */
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: rgba(79, 70, 229, 0.10);
+
+  /* Success / Warning / Error */
+  --success: #15803d;
+  --success-soft: rgba(21, 128, 61, 0.12);
+
+  --warning: #92400e;
+  --warning-soft: rgba(146, 64, 14, 0.12);
+
+  --error: #b91c1c;
+  --error-soft: rgba(185, 28, 28, 0.08);
+
+  /* Borders */
+  --border: #c7d0dd;
+  --border2: #b7c2d0;
+  --border-subtle: #d7dee8;
+
+  /* Shadows */
+  --shadow:
+    0 1px 2px rgba(0,0,0,.08),
+    0 10px 24px rgba(0,0,0,.08);
+
+  --shadow-lg:
+    0 14px 40px rgba(0,0,0,.12);
+
+  --shadow-inset:
+    inset 0 1px 0 rgba(255,255,255,.7);
+
+  /* Radius */
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-sm: 7px;
 }
 
 /* ── Base ─────────────────────────────────────────────────── */
@@ -51,7 +119,11 @@ html {
 }
 
 body {
-  background-color: var(--surface);
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(circle at 15% 0%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 45%),
+    radial-gradient(circle at 85% 100%, color-mix(in srgb, var(--accent-violet) 4%, transparent), transparent 45%);
+  background-attachment: fixed;
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   line-height: 1.6;
@@ -61,40 +133,43 @@ body {
 
 /* ── Scrollbar ────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--surface3);
-  border-radius: 4px;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
+  background: var(--border2);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted);
+  background-clip: padding-box;
 }
 
 /* Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--border) var(--surface3);
+  scrollbar-color: var(--border2) transparent;
 }
 
 /* ── Selection ────────────────────────────────────────────── */
 ::selection {
   background-color: var(--accent);
-  color: var(--surface);
+  color: #04121c;
 }
 
 /* ── Focus Ring ───────────────────────────────────────────── */
 *:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* ── Animations ───────────────────────────────────────────── */
@@ -131,68 +206,110 @@ body {
 
 /* ── Component Utilities ─────────────────────────────────── */
 @layer components {
+
+  /* ── Panels ("boxes") ──────────────────────────────────────
+     Every panel gets its own background layer, a full border, a soft
+     drop shadow to lift it off the canvas, and a 3px colored top edge
+     that identifies what kind of panel it is. That combination is what
+     keeps adjacent boxes from blending into each other.               */
   .card {
     background-color: var(--surface2);
     border: 1px solid var(--border);
-    border-radius: 0.75rem;
-    box-shadow: var(--shadow);
-    transition: box-shadow 0.2s ease, transform 0.15s ease;
+    border-top: 3px solid var(--border2);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow), var(--shadow-inset);
+    transition: box-shadow 0.2s ease, transform 0.15s ease, border-color 0.2s ease;
   }
 
   .card:hover {
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -4px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow-lg), var(--shadow-inset);
   }
 
+  .card-accent-blue   { border-top-color: var(--accent); }
+  .card-accent-violet { border-top-color: var(--accent-violet); }
+  .card-accent-teal   { border-top-color: var(--accent-teal); }
+  .card-accent-amber  { border-top-color: var(--accent-amber); }
+  .card-accent-success{ border-top-color: var(--success); }
+
+  .panel-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  .panel-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    flex-shrink: 0;
+  }
+
+  /* ── Buttons ────────────────────────────────────────────── */
   .btn-primary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    background-color: var(--accent);
-    color: var(--surface);
-    font-size: 0.875rem;
-    font-weight: 600;
-    border-radius: 0.5rem;
-    border: none;
+    gap: 0.45rem;
+    padding: 0.55rem 1.1rem;
+    background: linear-gradient(155deg, var(--accent), var(--accent-hover));
+    color: #04121c;
+    font-size: 0.83rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    border-radius: var(--radius-md);
+    border: 1px solid color-mix(in srgb, var(--accent) 60%, black 10%);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.25) inset, 0 4px 10px -3px color-mix(in srgb, var(--accent) 55%, transparent);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
   }
 
-  .btn-primary:hover {
-    background-color: var(--accent-hover);
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.06);
     transform: translateY(-1px);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.25) inset, 0 8px 16px -4px color-mix(in srgb, var(--accent) 60%, transparent);
   }
 
-  .btn-primary:active {
+  .btn-primary:active:not(:disabled) {
     transform: translateY(0);
+    filter: brightness(0.97);
   }
 
   .btn-primary:disabled {
     opacity: 0.4;
     cursor: not-allowed;
     transform: none;
+    box-shadow: none;
   }
 
   .btn-secondary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    background-color: transparent;
+    gap: 0.45rem;
+    padding: 0.55rem 1.1rem;
+    background-color: var(--surface3);
     color: var(--text);
-    font-size: 0.875rem;
-    font-weight: 500;
-    border-radius: 0.5rem;
-    border: 1px solid var(--border);
+    font-size: 0.83rem;
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border2);
     cursor: pointer;
     transition: all 0.15s ease;
   }
 
-  .btn-secondary:hover {
-    background-color: var(--surface3);
-    border-color: var(--muted);
+  .btn-secondary:hover:not(:disabled) {
+    background-color: var(--surface);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .btn-secondary:active:not(:disabled) {
+    transform: translateY(1px);
   }
 
   .btn-secondary:disabled {
@@ -200,20 +317,85 @@ body {
     cursor: not-allowed;
   }
 
+  /* Outlined "special action" button — used for things like Run Demo,
+     that shouldn't compete with the primary accent color. */
+  .btn-outline-violet {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.95rem;
+    background-color: var(--accent-violet-soft);
+    color: var(--accent-violet);
+    font-size: 0.78rem;
+    font-weight: 700;
+    border-radius: var(--radius-md);
+    border: 1px solid color-mix(in srgb, var(--accent-violet) 45%, transparent);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-outline-violet:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--accent-violet) 22%, transparent);
+    transform: translateY(-1px);
+  }
+
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.7rem;
+    background-color: transparent;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-ghost:hover:not(:disabled) {
+    background-color: var(--surface3);
+    color: var(--text);
+    border-color: var(--border);
+  }
+
+  .btn-danger-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.2rem 0.4rem;
+    background-color: transparent;
+    color: var(--muted);
+    font-size: 0.7rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-danger-ghost:hover {
+    background-color: var(--error-soft);
+    color: var(--error);
+    border-color: color-mix(in srgb, var(--error) 40%, transparent);
+  }
+
   .input {
     width: 100%;
     padding: 0.5rem 0.75rem;
     background-color: var(--surface);
     color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
+    border: 1px solid var(--border2);
+    border-radius: var(--radius-sm);
     font-size: 0.875rem;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   .input:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
 
   .input::placeholder {
@@ -232,22 +414,22 @@ body {
   }
 
   .badge-success {
-    background-color: rgba(74, 222, 128, 0.15);
+    background-color: var(--success-soft);
     color: var(--success);
-    border: 1px solid rgba(74, 222, 128, 0.3);
-  }
+    border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+}
 
   .badge-warning {
-    background-color: rgba(251, 191, 36, 0.15);
+    background-color: var(--warning-soft);
     color: var(--warning);
-    border: 1px solid rgba(251, 191, 36, 0.3);
-  }
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+}
 
   .badge-error {
-    background-color: rgba(248, 113, 113, 0.15);
+    background-color: var(--error-soft);
     color: var(--error);
-    border: 1px solid rgba(248, 113, 113, 0.3);
-  }
+    border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
+}
 
   .badge-info {
     background-color: rgba(56, 189, 248, 0.15);
@@ -264,7 +446,7 @@ body {
   .code-block {
     background-color: var(--surface3);
     border: 1px solid var(--border);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-md);
     padding: 1rem;
     font-family: "Fira Code", "SF Mono", Monaco, Consolas, monospace;
     font-size: 0.8125rem;

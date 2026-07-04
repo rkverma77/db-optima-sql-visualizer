@@ -1,5 +1,6 @@
 "use client";
 
+import { SunIcon, MoonIcon } from "@heroicons/react/24/outline";
 import { useTheme } from "@/app/providers";
 
 export function ThemeToggle() {
@@ -8,10 +9,19 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      className="btn-secondary"
+      className="flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-300 hover:scale-105"
+      style={{
+        border: "1px solid var(--border)",
+        background: "var(--surface3)",
+      }}
       aria-label="Toggle theme"
+      title="Toggle light / dark theme"
     >
-      {theme === "dark" ? "☀️" : "🌙"}
+      {theme === "dark" ? (
+        <SunIcon className="h-5 w-5 text-amber-400" />
+      ) : (
+        <MoonIcon className="h-5 w-5 text-slate-500" />
+      )}
     </button>
   );
 }

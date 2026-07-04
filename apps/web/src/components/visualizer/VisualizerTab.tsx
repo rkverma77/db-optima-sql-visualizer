@@ -126,24 +126,23 @@ export function VisualizerTab() {
   }, [visualizerSQL, tableData, animSpeed, isRunning, setPipeline, updateStepStatus, setQueryResult, setError, setIsRunning]);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 h-full">
       {/* ── Left: editor + pipeline ── */}
-      <div className="flex flex-col gap-4">
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface2)] p-4">
+      <div className="flex flex-col gap-5">
+        <div className="card card-accent-blue p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)]">SQL Editor</h3>
+            <h3 className="panel-heading">
+              <span className="panel-dot" style={{ background: "var(--accent)" }} />
+              SQL Editor
+            </h3>
             <div className="flex gap-2">
-              <button
-                onClick={run}
-                disabled={isRunning}
-                className="px-3 py-1.5 rounded-md bg-[var(--accent)] text-[var(--surface)] text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
-              >
+              <button onClick={run} disabled={isRunning} className="btn-primary !py-1.5 !px-3 !text-[13px]">
                 {isRunning ? "Running…" : "▶ Run"}
               </button>
               <button
                 onClick={() => setFrames([])}
                 disabled={isRunning}
-                className="px-3 py-1.5 rounded-md border border-[var(--border)] text-sm hover:bg-[var(--surface)] transition"
+                className="btn-secondary !py-1.5 !px-3 !text-[13px]"
               >
                 ↺ Reset
               </button>
@@ -159,8 +158,11 @@ export function VisualizerTab() {
           />
         </div>
 
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface2)] p-4 flex-1">
-          <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)] mb-3">Execution Plan</h3>
+        <div className="card card-accent-violet p-4 flex-1">
+          <h3 className="panel-heading mb-3">
+            <span className="panel-dot" style={{ background: "var(--accent-violet)" }} />
+            Execution Plan
+          </h3>
           <div className="space-y-2">
             {pipeline.length === 0 ? (
               <p className="text-sm text-[var(--muted)] italic">Awaiting query…</p>
@@ -171,16 +173,19 @@ export function VisualizerTab() {
         </div>
 
         {useStore.getState().error && (
-          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+          <div className="p-3 rounded-lg bg-[var(--error-soft)] border border-[var(--error)]/30 text-[var(--error)] text-sm">
             ⚠ {useStore.getState().error}
           </div>
         )}
       </div>
 
       {/* ── Right: animation stage + results ── */}
-      <div className="flex flex-col gap-4">
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface2)] p-4 flex-1 min-h-[300px]">
-          <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)] mb-3">Process Visualization</h3>
+      <div className="flex flex-col gap-5">
+        <div className="card card-accent-teal p-4 flex-1 min-h-[300px]">
+          <h3 className="panel-heading mb-3">
+            <span className="panel-dot" style={{ background: "var(--accent-teal)" }} />
+            Process Visualization
+          </h3>
           <div className="space-y-4 overflow-auto max-h-[500px]">
             {frames.length === 0 ? (
               <EmptyStage />
@@ -201,26 +206,29 @@ export function VisualizerTab() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface2)] p-4">
+        <div className="card card-accent-amber p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)]">Output</h3>
-            <span className="text-xs text-[var(--muted)]">
+            <h3 className="panel-heading">
+              <span className="panel-dot" style={{ background: "var(--accent-amber)" }} />
+              Output
+            </h3>
+            <span className="text-xs font-semibold text-[var(--muted)] px-2 py-0.5 rounded-full" style={{ background: "var(--surface3)", border: "1px solid var(--border)" }}>
               {useStore.getState().queryResult ? `${useStore.getState().queryResult!.values.length} rows` : "—"}
             </span>
           </div>
           {useStore.getState().queryResult && (
-            <div className="overflow-auto max-h-[200px]">
+            <div className="overflow-auto max-h-[200px] rounded-lg border border-[var(--border)]">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-[var(--border)]">
+                  <tr className="border-b border-[var(--border)]" style={{ background: "var(--surface3)" }}>
                     {useStore.getState().queryResult!.columns.map((c) => (
-                      <th key={c} className="text-left p-2 font-medium text-[var(--muted)]">{c}</th>
+                      <th key={c} className="text-left p-2 font-semibold text-[var(--muted)]">{c}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {useStore.getState().queryResult!.values.map((row, i) => (
-                    <tr key={`row-${i}`} className="border-b border-[var(--border)]/50">
+                    <tr key={`row-${i}`} className="border-b border-[var(--border)]/50 hover:bg-[var(--surface3)] transition-colors">
                       {row.map((v, j) => (
                         <td key={`cell-${i}-${j}`} className="p-2 font-mono text-xs">{String(v ?? "")}</td>
                       ))}
@@ -252,10 +260,10 @@ function PipelineStepRow({ step }: { step: PipelineStep }) {
 
   return (
     <div
-      className="flex items-center gap-3 p-3 rounded-md border text-sm transition-colors duration-300"
+      className="flex items-center gap-3 p-3 rounded-lg border text-sm transition-colors duration-300"
       style={{
         borderColor: borders[step.status],
-        backgroundColor: step.status === "active" ? "rgba(56,189,248,0.05)" : "transparent",
+        backgroundColor: step.status === "active" ? "var(--accent-violet-soft)" : "var(--surface3)",
       }}
     >
       <span
@@ -267,7 +275,7 @@ function PipelineStepRow({ step }: { step: PipelineStep }) {
         {step.alias ? ` ${step.alias}` : ""}
       </span>
       {step.status === "active" && (
-        <span className="ml-auto text-xs animate-pulse" style={{ color: colors[step.status] }}>
+        <span className="ml-auto text-xs font-medium animate-pulse" style={{ color: colors[step.status] }}>
           running…
         </span>
       )}
@@ -280,8 +288,8 @@ function VizTable({ label, rows, highlighted }: { label: string; rows: TableRow[
   const cols = Object.keys(rows[0]);
 
   return (
-    <div className="rounded-md border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-      <div className="px-3 py-2 bg-[var(--surface2)] border-b border-[var(--border)] text-xs font-semibold text-[var(--muted)] uppercase tracking-wider">
+    <div className="rounded-lg border border-[var(--border2)] bg-[var(--surface)] overflow-hidden shadow-[var(--shadow)]">
+      <div className="px-3 py-2 bg-[var(--surface3)] border-b border-[var(--border)] text-xs font-semibold text-[var(--muted2)] uppercase tracking-wider">
         {label}
       </div>
       <div className="overflow-x-auto">

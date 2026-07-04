@@ -36,7 +36,7 @@ export default function SharedQueryPage({ params }: { params: { id: string } }) 
     <div className="flex items-center justify-center h-screen" style={{ background: "var(--bg)", color: "var(--muted)" }}>
       {error ? (
         <div className="text-center">
-          <p className="text-[13px] mb-2" style={{ color: "var(--danger)" }}>⚠ {error}</p>
+          <p className="text-[13px] mb-2" style={{ color: "var(--error)" }}>⚠ {error}</p>
           <a href="/dashboard" className="text-[12px] underline" style={{ color: "var(--accent)" }}>Go to dashboard</a>
         </div>
       ) : (
