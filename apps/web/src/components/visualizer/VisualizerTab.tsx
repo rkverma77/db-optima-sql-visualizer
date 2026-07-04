@@ -1,5 +1,7 @@
 "use client";
 
+import { SQLEditor } from "@/components/ui/SQLEditor";
+
 import { useState, useCallback } from "react";
 import { useStore } from "@/store/useStore";
 import { parsePipeline, prefixRows, nestedLoopJoin, highlightSQL } from "@/lib/sql/engine";
@@ -148,13 +150,12 @@ export function VisualizerTab() {
             </div>
           </div>
 
-          {/* EDITABLE TEXTAREA */}
-          <textarea
+          {/* SQL EDITOR (syntax-highlighted) */}
+          <SQLEditor
             value={visualizerSQL}
-            onChange={(e) => setVisualizerSQL(e.target.value)}
-            className="input font-mono text-sm min-h-[200px] resize-y"
+            onChange={setVisualizerSQL}
             placeholder="Write your SQL query here..."
-            spellCheck={false}
+            minHeight={200}
           />
         </div>
 

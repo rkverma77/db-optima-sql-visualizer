@@ -71,10 +71,10 @@ interface AppState {
   loadDataset: (key: keyof typeof SAMPLE_DATASETS) => void;
 
   saveStatus: "idle" | "saving" | "saved" | "error";
-  savedQueryId: number | null;
+  savedQueryId: string | null;
   saveError: string | null;
   setSaveStatus: (s: AppState["saveStatus"]) => void;
-  setSavedQueryId: (id: number | null) => void;
+  setSavedQueryId: (id: string | null) => void;
   setSaveError: (msg: string | null) => void;
 
   demoTrigger: number;

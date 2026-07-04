@@ -169,7 +169,7 @@ function ShareModal({
   error,
   onClose,
 }: {
-  id: number | null;
+  id: string | null;
   error: string | null;
   onClose: () => void;
 }) {

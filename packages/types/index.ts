@@ -15,3 +15,7 @@ export const OptimizationResultSchema = z.object({
 });
 
 export type OptimizationResult = z.infer<typeof OptimizationResultSchema>;
+
+export const IndexSuggestionsSchema = z.array(z.string().min(1));
+
+export type IndexSuggestions = z.infer<typeof IndexSuggestionsSchema>;

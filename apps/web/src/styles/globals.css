@@ -309,6 +309,34 @@ body {
   color: var(--surface) !important;
 }
 
+/* Prism's SQL grammar only assigns token *classes* — it ships no colors
+   itself. Without a theme, every token renders in the default text color
+   (which is why the editor looked completely unhighlighted). These match
+   the same palette highlightSQL() already uses for the read-only preview,
+   so the editable and read-only views look consistent. */
+.prism-editor .token.keyword {
+  color: #38bdf8;
+  font-weight: bold;
+}
+.prism-editor .token.function {
+  color: #a78bfa;
+}
+.prism-editor .token.string {
+  color: #22c55e;
+}
+.prism-editor .token.number,
+.prism-editor .token.boolean {
+  color: #f472b6;
+}
+.prism-editor .token.comment {
+  color: #6b7280;
+  font-style: italic;
+}
+.prism-editor .token.operator,
+.prism-editor .token.punctuation {
+  color: var(--muted);
+}
+
 /* ── Recharts Override ──────────────────────────────────── */
 .recharts-tooltip-wrapper {
   outline: none !important;

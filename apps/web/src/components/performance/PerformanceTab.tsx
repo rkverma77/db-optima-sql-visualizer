@@ -7,7 +7,7 @@ import {
   BarChart, Bar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
 } from "recharts";
 import type { PerfDataPoint } from "@/types";
-import { benchmarkAcrossVolumes, explainQueryPlan, verifyIndexImpact } from "@/lib/sql/runner";
+import { benchmarkAcrossVolumes, explainQueryPlan, verifyIndexImpact, yieldToBrowser } from "@/lib/sql/runner";
 import { generateSyntheticData } from "@/lib/data/datasets";
 import { parsePipeline, deriveIndexSuggestions, highlightSQL } from "@/lib/sql/engine";
 
@@ -190,6 +190,7 @@ export function PerformanceTab() {
       }]);
 
       // Get EXPLAIN and verify
+      await yieldToBrowser();
       const scaled = generateSyntheticData(tableData, dataVolume);
       const before = await explainQueryPlan(visualizerSQL, scaled);
       setPlanBefore(before.summary);
@@ -197,6 +198,7 @@ export function PerformanceTab() {
 
       // Run verifyIndexImpact for detailed comparison
       if (indexDdl.length > 0) {
+        await yieldToBrowser();
         const verify = await verifyIndexImpact(visualizerSQL, scaled, indexDdl);
         setVerifyResult(verify);
         setPlanAfterRaw(verify.after.raw);

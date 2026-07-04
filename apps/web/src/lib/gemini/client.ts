@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { OptimizationResultSchema, IndexSuggestionsSchema } from "@db-optima/types";
 import type { OptimizationResult } from "@/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -56,12 +57,21 @@ ${sql}`;
 
   const clean = text.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
 
+  let parsedJson: unknown;
   try {
-    return JSON.parse(clean) as OptimizationResult;
+    parsedJson = JSON.parse(clean);
   } catch (parseErr) {
     console.error("Gemini raw response:", text);
     throw new Error("AI returned malformed JSON. Please retry.");
   }
+
+  const validated = OptimizationResultSchema.safeParse(parsedJson);
+  if (!validated.success) {
+    console.error("Gemini response failed schema validation:", validated.error.flatten(), "raw:", text);
+    throw new Error("AI returned an unexpected response shape. Please retry.");
+  }
+
+  return validated.data as OptimizationResult;
 }
 
 /**
@@ -87,10 +97,19 @@ ${sql}`;
   const text = result.response.text().trim();
   const clean = text.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
 
+  let parsedJson: unknown;
   try {
-    return JSON.parse(clean) as string[];
+    parsedJson = JSON.parse(clean);
   } catch (parseErr) {
     console.error("Gemini raw response:", text);
     throw new Error("AI returned malformed JSON. Please retry.");
   }
+
+  const validated = IndexSuggestionsSchema.safeParse(parsedJson);
+  if (!validated.success) {
+    console.error("Gemini response failed schema validation:", validated.error.flatten(), "raw:", text);
+    throw new Error("AI returned an unexpected response shape. Please retry.");
+  }
+
+  return validated.data;
 }

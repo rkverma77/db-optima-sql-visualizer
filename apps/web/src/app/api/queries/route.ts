@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "crypto";
 import { SaveQueryRequestSchema } from "@/lib/utils/validators";
 
 export const runtime = "nodejs";
+
+/**
+ * Opaque, URL-safe, non-enumerable id for a saved query's public share link.
+ * 12 random bytes → 16 base64url chars ≈ 96 bits of entropy, plenty to make
+ * guessing/scanning infeasible for a share-link use case.
+ */
+function generateSavedQueryId(): string {
+  return randomBytes(12).toString("base64url");
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,12 +40,10 @@ export async function POST(req: NextRequest) {
     const { savedQueries } = await import("@db-optima/database/schema");
 
     const { name, sql, schemaJson } = parsed.data;
-    const [row] = await db
-      .insert(savedQueries)
-      .values({ name, sql, schemaJson })
-      .returning({ id: savedQueries.id }); // FIXED: explicit column
+    const id = generateSavedQueryId();
+    await db.insert(savedQueries).values({ id, name, sql, schemaJson });
 
-    return NextResponse.json({ id: row.id });
+    return NextResponse.json({ id });
   } catch (err) {
     console.error("[/api/queries POST]", err);
     return NextResponse.json(

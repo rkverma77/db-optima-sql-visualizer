@@ -30,23 +30,30 @@ type CellValue = string | number | null;
 function buildDatabase(SQL: Awaited<ReturnType<typeof initSqlJs>>, data: Data): Database {
   const db = new SQL.Database();
   db.run("PRAGMA foreign_keys = OFF;");
+  db.run("BEGIN TRANSACTION;");
 
-  for (const [tbl, rows] of Object.entries(data)) {
-    if (!rows.length) continue;
-    const cols = Object.keys(rows[0]);
-    db.run(`CREATE TABLE IF NOT EXISTS "${tbl}" (${cols.map((c) => `"${c}"`).join(",")})`);
+  try {
+    for (const [tbl, rows] of Object.entries(data)) {
+      if (!rows.length) continue;
+      const cols = Object.keys(rows[0]);
+      db.run(`CREATE TABLE IF NOT EXISTS "${tbl}" (${cols.map((c) => `"${c}"`).join(",")})`);
 
-    const placeholders = cols.map(() => "?").join(",");
-    const stmt: Statement = db.prepare(
-      `INSERT INTO "${tbl}" (${cols.map((c) => `"${c}"`).join(",")}) VALUES (${placeholders})`
-    );
-    try {
-      for (const row of rows) {
-        stmt.run(cols.map((c) => row[c] ?? null));
+      const placeholders = cols.map(() => "?").join(",");
+      const stmt: Statement = db.prepare(
+        `INSERT INTO "${tbl}" (${cols.map((c) => `"${c}"`).join(",")}) VALUES (${placeholders})`
+      );
+      try {
+        for (const row of rows) {
+          stmt.run(cols.map((c) => row[c] ?? null));
+        }
+      } finally {
+        stmt.free();
       }
-    } finally {
-      stmt.free();
     }
+    db.run("COMMIT;");
+  } catch (err) {
+    db.run("ROLLBACK;");
+    throw err;
   }
   return db;
 }
@@ -163,6 +170,21 @@ export async function verifyIndexImpact(
 }
 
 // ── Benchmark helpers ───────────────────────────────────────────
+
+/**
+ * Hands control back to the browser for one tick.
+ *
+ * `await somePromise` alone only schedules a microtask — the browser does
+ * NOT get a chance to paint, animate the spinner, or respond to input
+ * between microtasks. Only macrotask boundaries (setTimeout, message events)
+ * let rendering happen. Without this, a multi-second synchronous WASM loop
+ * (building several databases with up to 100K rows each, across every
+ * volume point) freezes the tab completely for its full duration.
+ */
+export function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 async function measureMedian(db: Database, sql: string, runs: number = 3): Promise<number> {
   const times: number[] = [];
   for (let i = 0; i < runs; i++) {
@@ -187,11 +209,17 @@ export async function benchmarkAcrossVolumes(
   const out: { rows: number; seqMs: number; idxMs: number }[] = [];
 
   for (const rows of volumes) {
+    // Let the browser paint (spinner, elapsed-time counter) and process
+    // input before starting the next, potentially expensive, volume point.
+    await yieldToBrowser();
+
     const data = buildData(rows);
 
     const dbSeq = buildDatabase(SQL, data);
     const seqMs = await measureMedian(dbSeq, sql);
     dbSeq.close();
+
+    await yieldToBrowser();
 
     const dbIdx = buildDatabase(SQL, data);
     for (const ddl of indexDdl) {

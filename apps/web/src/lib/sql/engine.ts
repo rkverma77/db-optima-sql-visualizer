@@ -186,13 +186,19 @@ export function highlightSQL(raw: string): string {
     .replace(/>/g, "&gt;")
     .replace(/(--[^\n]*)/g, '<span style="color:#6b7280;font-style:italic">$1</span>')
     .replace(/('(?:[^'\\]|\\.)*')/g, '<span style="color:#22c55e">$1</span>')
+    // Numeric literals are highlighted before any keyword/function spans are
+    // injected below. Those spans carry CSS values (e.g. font weights) that
+    // are themselves bare digit runs bounded by non-word characters — if
+    // this ran after them, it would match and wrap digits inside a style
+    // attribute, corrupting the tag (this previously leaked literal
+    // `600">` text into the rendered output).
+    .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span style="color:#f472b6">$1</span>')
     .replace(
       /\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|ON|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET|AS|WITH|UNION|EXCEPT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|INDEX|TABLE|INTO|VALUES|SET|AND|OR|NOT|NULL|IS|IN|EXISTS|BETWEEN|LIKE|DISTINCT|CASE|WHEN|THEN|ELSE|END)\b/gi,
-      '<span style="color:#38bdf8;font-weight:600">$1</span>'
+      '<span style="color:#38bdf8;font-weight:bold">$1</span>'
     )
     .replace(
       /\b(COUNT|SUM|AVG|MAX|MIN|COALESCE|NULLIF|CAST|ROW_NUMBER|RANK|DENSE_RANK|LAG|LEAD|OVER|PARTITION\s+BY|DATE_TRUNC)\b/gi,
       '<span style="color:#a78bfa">$1</span>'
-    )
-    .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span style="color:#f472b6">$1</span>');
+    );
 }

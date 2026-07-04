@@ -19,8 +19,8 @@ export function SQLEditor({ value, onChange, placeholder, minHeight = 200 }: Pro
 
   return (
     <div
-      className="relative rounded-lg border border-[var(--border)] overflow-hidden font-mono text-sm"
-      style={{ minHeight }}
+      className="relative rounded-lg border border-[var(--border)] overflow-y-auto font-mono text-sm bg-[var(--surface)]"
+      style={{ height: minHeight }}
     >
       <Editor
         value={value}
@@ -28,12 +28,13 @@ export function SQLEditor({ value, onChange, placeholder, minHeight = 200 }: Pro
         highlight={highlight}
         padding={16}
         placeholder={placeholder}
-        className="bg-[var(--surface)] text-[var(--text)]"
+        className="prism-editor text-[var(--text)]"
         textareaClassName="focus:outline-none"
         style={{
           fontFamily: '"Fira Code", "SF Mono", Monaco, monospace',
           fontSize: 14,
           lineHeight: "1.5",
+          minHeight: "100%",
         }}
       />
     </div>

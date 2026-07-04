@@ -6,6 +6,7 @@ import { buildSchemaString } from "@/lib/sql/engine";
 import { explainQueryPlan, verifyIndexImpact } from "@/lib/sql/runner";
 import { OptimizerResult } from "./OptimizerResult";
 import { highlightSQL } from "@/lib/sql/engine";
+import { SQLEditor } from "@/components/ui/SQLEditor";
 
 export function OptimizerTab() {
   const {
@@ -118,12 +119,11 @@ export function OptimizerTab() {
             </button>
           </div>
 
-          <textarea
+          <SQLEditor
             value={aiSQL}
-            onChange={(e) => setAiSQL(e.target.value)}
-            className="input font-mono text-sm min-h-[200px] resize-y"
+            onChange={setAiSQL}
             placeholder="Paste your SQL query here…"
-            spellCheck={false}
+            minHeight={200}
           />
 
           {/* Quick stats */}
