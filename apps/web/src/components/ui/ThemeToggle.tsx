@@ -1,6 +1,6 @@
 "use client";
 
-import { SunIcon, MoonIcon } from "@heroicons/react/24/outline";
+import { SunMedium, MoonStar } from "lucide-react";
 import { useTheme } from "@/app/providers";
 
 export function ThemeToggle() {
@@ -18,9 +18,9 @@ export function ThemeToggle() {
       title="Toggle light / dark theme"
     >
       {theme === "dark" ? (
-        <SunIcon className="h-5 w-5 text-amber-400" />
+        <SunMedium className="h-5 w-5 text-amber-400" />
       ) : (
-        <MoonIcon className="h-5 w-5 text-slate-500" />
+        <MoonStar className="h-5 w-5 text-slate-500" />
       )}
     </button>
   );
