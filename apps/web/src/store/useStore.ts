@@ -2,17 +2,16 @@ import { create } from "zustand";
 import type { TableData, PipelineStep, QueryResult, OptimizationResult, VerifyIndexResult } from "@/types";
 import { SAMPLE_DATASETS } from "@/lib/data/datasets";
 
-// ── Default seed data ─────────────────────────────────────────
 const DEFAULT_DATA: TableData = {
   Products: [
-    { id: 1, name: "Laptop",   price: 1200, category: "Electronics" },
-    { id: 2, name: "Mouse",    price: 25,   category: "Peripherals" },
-    { id: 3, name: "Monitor",  price: 300,  category: "Electronics" },
-    { id: 4, name: "Keyboard", price: 75,   category: "Peripherals" },
+    { id: 1, name: "Laptop", price: 1200, category: "Electronics" },
+    { id: 2, name: "Mouse", price: 25, category: "Peripherals" },
+    { id: 3, name: "Monitor", price: 300, category: "Electronics" },
+    { id: 4, name: "Keyboard", price: 75, category: "Peripherals" },
   ],
   Customers: [
     { id: 1, name: "Alice", country: "US" },
-    { id: 2, name: "Bob",   country: "UK" },
+    { id: 2, name: "Bob", country: "UK" },
     { id: 3, name: "Carol", country: "US" },
   ],
   Orders: [
@@ -24,9 +23,7 @@ const DEFAULT_DATA: TableData = {
   ],
 };
 
-// ── Store interface ───────────────────────────────────────────
 interface AppState {
-  // Schema
   tableData: TableData;
   setTableData: (data: TableData) => void;
   addTable: (name: string) => void;
@@ -37,7 +34,6 @@ interface AppState {
   updateCell: (table: string, row: number, col: string, value: string | number | null) => void;
   renameColumn: (table: string, oldName: string, newName: string) => void;
 
-  // Visualizer
   visualizerSQL: string;
   setVisualizerSQL: (sql: string) => void;
   pipeline: PipelineStep[];
@@ -47,12 +43,11 @@ interface AppState {
   setQueryResult: (r: QueryResult | null) => void;
   isRunning: boolean;
   setIsRunning: (v: boolean) => void;
-  animSpeed: number;          // ms between frames
+  animSpeed: number;
   setAnimSpeed: (v: number) => void;
   error: string | null;
   setError: (msg: string | null) => void;
 
-  // AI Optimizer
   aiSQL: string;
   setAiSQL: (sql: string) => void;
   aiResult: OptimizationResult | null;
@@ -62,11 +57,9 @@ interface AppState {
   aiError: string | null;
   setAiError: (msg: string | null) => void;
 
-  // Performance tab
   dataVolume: number;
   setDataVolume: (v: number) => void;
 
-  // Index verification (AI Optimizer "Apply & Verify")
   verifyResult: VerifyIndexResult | null;
   setVerifyResult: (r: VerifyIndexResult | null) => void;
   verifyLoading: boolean;
@@ -74,11 +67,9 @@ interface AppState {
   verifyError: string | null;
   setVerifyError: (msg: string | null) => void;
 
-  // Sample datasets
   activeDataset: string | null;
   loadDataset: (key: keyof typeof SAMPLE_DATASETS) => void;
 
-  // Save / share
   saveStatus: "idle" | "saving" | "saved" | "error";
   savedQueryId: number | null;
   saveError: string | null;
@@ -86,14 +77,11 @@ interface AppState {
   setSavedQueryId: (id: number | null) => void;
   setSaveError: (msg: string | null) => void;
 
-  // Demo mode — Header sets aiSQL + bumps this counter; OptimizerTab watches
-  // it and auto-runs "Optimize with AI" once the tab is switched to it.
   demoTrigger: number;
   runDemo: () => void;
 }
 
 export const useStore = create<AppState>((set) => ({
-  // ── Schema ──
   tableData: JSON.parse(JSON.stringify(DEFAULT_DATA)),
   setTableData: (data) => set({ tableData: data }),
 
@@ -113,7 +101,7 @@ export const useStore = create<AppState>((set) => ({
     set((s) => {
       const rows = s.tableData[table];
       const cols = rows[0] ? Object.keys(rows[0]) : ["id"];
-      const newRow: Record<string, null> = {};
+      const newRow: Record<string, string | number | null> = {};
       cols.forEach((c) => (newRow[c] = null));
       return { tableData: { ...s.tableData, [table]: [...rows, newRow] } };
     }),
@@ -157,16 +145,15 @@ export const useStore = create<AppState>((set) => ({
       return { tableData: { ...s.tableData, [table]: rows } };
     }),
 
-  // ── Visualizer ──
   visualizerSQL: `SELECT
-    o.id       AS order_id,
-    c.name     AS customer,
-    p.name     AS product,
-    o.quantity,
-    p.price
+  o.id AS order_id,
+  c.name AS customer,
+  p.name AS product,
+  o.quantity,
+  p.price
 FROM Orders o
 JOIN Customers c ON o.customer_id = c.id
-JOIN Products  p ON o.product_id  = p.id
+JOIN Products p ON o.product_id = p.id
 WHERE o.quantity > 0`,
   setVisualizerSQL: (sql) => set({ visualizerSQL: sql }),
 
@@ -191,7 +178,6 @@ WHERE o.quantity > 0`,
   error: null,
   setError: (msg) => set({ error: msg }),
 
-  // ── AI Optimizer ──
   aiSQL: `SELECT *
 FROM Orders o, Customers c
 WHERE o.customer_id = c.id
@@ -207,11 +193,9 @@ AND o.quantity > 1`,
   aiError: null,
   setAiError: (msg) => set({ aiError: msg }),
 
-  // ── Performance ──
-  dataVolume: 100_000,
+  dataVolume: 10_000,
   setDataVolume: (v) => set({ dataVolume: v }),
 
-  // ── Index verification ──
   verifyResult: null,
   setVerifyResult: (r) => set({ verifyResult: r }),
   verifyLoading: false,
@@ -219,7 +203,6 @@ AND o.quantity > 1`,
   verifyError: null,
   setVerifyError: (msg) => set({ verifyError: msg }),
 
-  // ── Sample datasets ──
   activeDataset: null,
   loadDataset: (key) =>
     set({
@@ -231,7 +214,6 @@ AND o.quantity > 1`,
       verifyResult: null,
     }),
 
-  // ── Save / share ──
   saveStatus: "idle",
   savedQueryId: null,
   saveError: null,
@@ -239,7 +221,6 @@ AND o.quantity > 1`,
   setSavedQueryId: (id) => set({ savedQueryId: id }),
   setSaveError: (msg) => set({ saveError: msg }),
 
-  // ── Demo mode ──
   demoTrigger: 0,
   runDemo: () =>
     set((s) => ({

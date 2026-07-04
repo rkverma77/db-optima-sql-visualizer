@@ -1,58 +1,41 @@
 "use client";
 
-import { useRef, useEffect } from "react";
-import { highlightSQL } from "@/lib/sql/engine";
+import { useCallback } from "react";
+import Editor from "react-simple-code-editor";
+import Prism from "prismjs";
+import "prismjs/components/prism-sql";
 
-interface SQLEditorProps {
+interface Props {
   value: string;
   onChange: (v: string) => void;
-  className?: string;
+  placeholder?: string;
+  minHeight?: number;
 }
 
-export function SQLEditor({ value, onChange, className = "" }: SQLEditorProps) {
-  const hlRef  = useRef<HTMLDivElement>(null);
-  const taRef  = useRef<HTMLTextAreaElement>(null);
-
-  const syncHighlight = (text: string) => {
-    if (hlRef.current) hlRef.current.innerHTML = highlightSQL(text);
-  };
-
-  useEffect(() => { syncHighlight(value); }, [value]);
-
-  const syncScroll = () => {
-    if (!taRef.current || !hlRef.current) return;
-    hlRef.current.scrollTop  = taRef.current.scrollTop;
-    hlRef.current.scrollLeft = taRef.current.scrollLeft;
-  };
+export function SQLEditor({ value, onChange, placeholder, minHeight = 200 }: Props) {
+  const highlight = useCallback((code: string) => {
+    return Prism.highlight(code, Prism.languages.sql, "sql");
+  }, []);
 
   return (
-    <div className={`relative flex-1 overflow-hidden ${className}`} style={{ background: "var(--bg)" }}>
-      {/* Highlighted layer */}
-      <div
-        ref={hlRef}
-        aria-hidden
-        className="absolute inset-0 p-3 font-mono text-[12.5px] leading-relaxed whitespace-pre overflow-hidden pointer-events-none z-10"
-        style={{ color: "var(--text)" }}
-      />
-      {/* Editable layer */}
-      <textarea
-        ref={taRef}
+    <div
+      className="relative rounded-lg border border-[var(--border)] overflow-hidden font-mono text-sm"
+      style={{ minHeight }}
+    >
+      <Editor
         value={value}
-        onChange={(e) => { onChange(e.target.value); syncHighlight(e.target.value); }}
-        onScroll={syncScroll}
-        spellCheck={false}
-        className="absolute inset-0 p-3 font-mono text-[12.5px] leading-relaxed whitespace-pre resize-none z-20 outline-none border-none overflow-auto"
-        style={{ background: "transparent", color: "transparent", caretColor: "var(--accent)" }}
+        onValueChange={onChange}
+        highlight={highlight}
+        padding={16}
+        placeholder={placeholder}
+        className="bg-[var(--surface)] text-[var(--text)]"
+        textareaClassName="focus:outline-none"
+        style={{
+          fontFamily: '"Fira Code", "SF Mono", Monaco, monospace',
+          fontSize: 14,
+          lineHeight: "1.5",
+        }}
       />
-
-      {/* Inline syntax-highlight styles (scoped) */}
-      <style>{`
-        .sql-kw  { color: var(--code-kw);  font-weight: 600; }
-        .sql-fn  { color: var(--code-fn);  }
-        .sql-str { color: var(--code-str); }
-        .sql-num { color: var(--code-num); }
-        .sql-com { color: var(--code-com); font-style: italic; }
-      `}</style>
     </div>
   );
 }

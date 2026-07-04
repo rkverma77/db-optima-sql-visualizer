@@ -16,79 +16,129 @@ export function buildSchemaString(data: TableData): string {
  * Supports FROM, one or more JOINs, WHERE, SELECT.
  */
 export function parsePipeline(sql: string): PipelineStep[] {
-  const words = sql.replace(/[\n\t]/g, " ").split(/\s+/).filter(Boolean);
+  const tokens = sql.replace(/[\n\t]/g, " ").split(/\s+/).filter(Boolean);
   const steps: PipelineStep[] = [];
 
-  const fi = words.findIndex((w) => w.toUpperCase() === "FROM");
+  const fi = tokens.findIndex((w) => w.toUpperCase() === "FROM");
   if (fi === -1) return [];
 
-  const baseTbl = words[fi + 1];
-  const skip = ["JOIN","LEFT","RIGHT","INNER","WHERE","GROUP","ORDER","LIMIT","HAVING"];
-  const baseAlias =
-    words[fi + 2] && !skip.includes(words[fi + 2].toUpperCase())
-      ? words[fi + 2]
-      : baseTbl;
+  // ── FROM clause ──
+  const baseTbl = tokens[fi + 1];
+  let pos = fi + 2;
+  let baseAlias = baseTbl;
+
+  if (tokens[pos]?.toUpperCase() === "AS") {
+    baseAlias = tokens[pos + 1] ?? baseTbl;
+    pos += 2;
+  } else if (tokens[pos] && !isClauseKeyword(tokens[pos])) {
+    baseAlias = tokens[pos];
+    pos++;
+  }
 
   steps.push({ type: "FROM", table: baseTbl, alias: baseAlias, status: "pending" });
 
-  let ci = fi + 2;
-  while (ci < words.length) {
-    const w = words[ci].toUpperCase();
-    const isJoin =
-      w === "JOIN" ||
-      (["LEFT", "RIGHT", "INNER", "CROSS"].includes(w) &&
-        words[ci + 1]?.toUpperCase() === "JOIN");
+  // ── JOIN / WHERE / etc. ──
+  while (pos < tokens.length) {
+    const w = tokens[pos].toUpperCase();
 
-    if (isJoin) {
+    // JOIN detection
+    if (w === "JOIN" || (isJoinModifier(w) && tokens[pos + 1]?.toUpperCase() === "JOIN")) {
       const offset = w === "JOIN" ? 1 : 2;
-      const jTbl = words[ci + offset];
-      const jAlias =
-        words[ci + offset + 1] &&
-        words[ci + offset + 1].toUpperCase() !== "ON"
-          ? words[ci + offset + 1]
-          : jTbl;
+      const jTbl = tokens[pos + offset];
+      let jAlias = jTbl;
+      let afterTable = pos + offset + 1;
 
-      const oi = words.findIndex((w2, idx) => idx > ci && w2.toUpperCase() === "ON");
-      let leftKey = "",
-        rightKey = "";
-      if (oi !== -1) {
-        const cond = words.slice(oi + 1, oi + 4).join("");
-        const parts = cond.split("=");
-        if (parts.length === 2) {
-          leftKey = parts[0].trim();
-          rightKey = parts[1].trim();
+      if (tokens[afterTable]?.toUpperCase() === "AS") {
+        jAlias = tokens[afterTable + 1] ?? jTbl;
+        afterTable += 2;
+      } else if (tokens[afterTable] && !isClauseKeyword(tokens[afterTable]) && tokens[afterTable].toUpperCase() !== "ON") {
+        jAlias = tokens[afterTable];
+        afterTable++;
+      }
+
+      // Find ON that belongs to THIS join (before next JOIN or WHERE)
+      let onIdx = -1;
+      for (let j = afterTable; j < tokens.length; j++) {
+        const t = tokens[j].toUpperCase();
+        if (t === "ON") { onIdx = j; break; }
+        if (isClauseKeyword(t) && t !== "ON") break;
+      }
+
+      let leftKey = "", rightKey = "";
+      if (onIdx !== -1) {
+        const clauseEnd = findNextClause(tokens, onIdx);
+        const eqIdx = tokens.findIndex((t, idx) => idx > onIdx && idx < clauseEnd && t === "=");
+        if (eqIdx !== -1) {
+          leftKey = tokens[eqIdx - 1] ?? "";
+          rightKey = tokens[eqIdx + 1] ?? "";
         }
       }
-      steps.push({ type: "JOIN", table: jTbl, alias: jAlias, leftKey, rightKey, status: "pending" });
 
-      // The modifier form ("LEFT JOIN") spans two tokens (LEFT, JOIN). Without
-      // skipping the extra token, the next loop iteration would land on the
-      // bare "JOIN" token and count the same join a second time.
-      if (offset === 2) ci++;
+      steps.push({ type: "JOIN", table: jTbl, alias: jAlias, leftKey, rightKey, status: "pending" });
+      if (offset === 2) pos++; // skip modifier (LEFT, RIGHT, etc.)
     }
 
-    if (w === "WHERE") steps.push({ type: "WHERE", status: "pending" });
-    ci++;
+    // WHERE clause
+    if (w === "WHERE") {
+      const condEnd = findNextClause(tokens, pos);
+      const condition = tokens.slice(pos + 1, condEnd).join(" ");
+      steps.push({ type: "WHERE", condition, status: "pending" });
+    }
+
+    pos++;
   }
 
   steps.push({ type: "SELECT", status: "pending" });
   return steps;
 }
 
-// ── Naive index suggestions from parsed JOIN keys ─────────────
+// ── Helpers ──
+function isJoinModifier(token: string): boolean {
+  return ["LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "FULL", "NATURAL"].includes(token.toUpperCase());
+}
+
+function isClauseKeyword(token: string): boolean {
+  return ["SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "FULL", "NATURAL", "ON", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET", "UNION", "EXCEPT", "INTERSECT"].includes(token.toUpperCase());
+}
+
+function findNextClause(tokens: string[], start: number): number {
+  for (let i = start + 1; i < tokens.length; i++) {
+    const t = tokens[i].toUpperCase();
+    if (["JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "FULL", "NATURAL", "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET", "UNION", "EXCEPT", "INTERSECT"].includes(t)) {
+      return i;
+    }
+  }
+  return tokens.length;
+}
+
+// ── Index suggestions from parsed JOIN keys + WHERE columns ──
 /**
- * Derives simple `CREATE INDEX` statements from the JOIN keys found by
- * parsePipeline. This is a fallback used by the Performance tab so it has
- * *some* real index to benchmark before the user has run the AI Optimizer;
- * it is intentionally naive (no cost model) — the AI Optimizer's suggestions
- * take precedence whenever they're available.
+ * Derives simple `CREATE INDEX` statements from the JOIN keys and WHERE columns
+ * found by parsePipeline. This is a fallback used by the Performance tab so it has
+ * *some* real index to benchmark before the user has run the AI Optimizer.
  */
 export function deriveIndexSuggestions(steps: PipelineStep[]): string[] {
   const ddl: string[] = [];
+  const seen = new Set<string>();
+
   for (const step of steps) {
-    if (step.type !== "JOIN" || !step.table || !step.leftKey || !step.rightKey) continue;
-    const col = step.rightKey.includes(".") ? step.rightKey.split(".")[1] : step.rightKey;
-    if (col) ddl.push(`CREATE INDEX IF NOT EXISTS idx_${step.table}_${col} ON "${step.table}"("${col}")`);
+    if (step.type === "JOIN" && step.table && step.leftKey && step.rightKey) {
+      const col = step.rightKey.includes(".") ? step.rightKey.split(".")[1] : step.rightKey;
+      const stmt = `CREATE INDEX IF NOT EXISTS idx_${step.table}_${col} ON "${step.table}"("${col}")`;
+      if (!seen.has(stmt)) { ddl.push(stmt); seen.add(stmt); }
+    }
+    if (step.type === "WHERE" && step.condition) {
+      // Naive: extract table.column patterns like "o.customer_id = ..."
+      const matches = step.condition.match(/(\w+)\.(\w+)\s*[=<>]/g) ?? [];
+      for (const m of matches) {
+        const parts = m.match(/(\w+)\.(\w+)/);
+        if (parts) {
+          const [, tbl, col] = parts;
+          const stmt = `CREATE INDEX IF NOT EXISTS idx_${tbl}_${col} ON "${tbl}"("${col}")`;
+          if (!seen.has(stmt)) { ddl.push(stmt); seen.add(stmt); }
+        }
+      }
+    }
   }
   return ddl;
 }
@@ -117,11 +167,10 @@ export function* nestedLoopJoin(
 ): Generator<JoinMatch> {
   for (let a = 0; a < left.length; a++) {
     for (let b = 0; b < right.length; b++) {
-      const vA: CellValue =
-        (left[a][leftKey] ?? left[a][rightKey] ?? Object.values(left[a])[0]) as CellValue;
-      const vB: CellValue =
-        (right[b][leftKey] ?? right[b][rightKey] ?? Object.values(right[b])[0]) as CellValue;
+      const vA = left[a][leftKey];
+      const vB = right[b][rightKey];
 
+      // Strict: both keys must exist and match
       if (vA != null && vB != null && String(vA) === String(vB)) {
         yield { merged: { ...left[a], ...right[b] }, aIdx: a, bIdx: b };
       }
@@ -135,15 +184,15 @@ export function highlightSQL(raw: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/(--[^\n]*)/g, '<span class="sql-com">$1</span>')
-    .replace(/('(?:[^'\\]|\\.)*')/g, '<span class="sql-str">$1</span>')
+    .replace(/(--[^\n]*)/g, '<span style="color:#6b7280;font-style:italic">$1</span>')
+    .replace(/('(?:[^'\\]|\\.)*')/g, '<span style="color:#22c55e">$1</span>')
     .replace(
       /\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|ON|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET|AS|WITH|UNION|EXCEPT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|INDEX|TABLE|INTO|VALUES|SET|AND|OR|NOT|NULL|IS|IN|EXISTS|BETWEEN|LIKE|DISTINCT|CASE|WHEN|THEN|ELSE|END)\b/gi,
-      '<span class="sql-kw">$1</span>'
+      '<span style="color:#38bdf8;font-weight:600">$1</span>'
     )
     .replace(
       /\b(COUNT|SUM|AVG|MAX|MIN|COALESCE|NULLIF|CAST|ROW_NUMBER|RANK|DENSE_RANK|LAG|LEAD|OVER|PARTITION\s+BY|DATE_TRUNC)\b/gi,
-      '<span class="sql-fn">$1</span>'
+      '<span style="color:#a78bfa">$1</span>'
     )
-    .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="sql-num">$1</span>');
+    .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span style="color:#f472b6">$1</span>');
 }

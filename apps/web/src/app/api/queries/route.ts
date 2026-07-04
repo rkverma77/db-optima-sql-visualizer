@@ -3,11 +3,6 @@ import { SaveQueryRequestSchema } from "@/lib/utils/validators";
 
 export const runtime = "nodejs";
 
-// NOTE: requires DATABASE_URL to be set (see docker/docker-compose.yml for a
-// local Postgres you can run with `docker compose up -d && npm run db:push`).
-// The db client is imported lazily so the rest of the app (which works fully
-// client-side via sql.js) doesn't hard-require a Postgres connection to boot.
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -38,7 +33,7 @@ export async function POST(req: NextRequest) {
     const [row] = await db
       .insert(savedQueries)
       .values({ name, sql, schemaJson })
-      .returning();
+      .returning({ id: savedQueries.id }); // FIXED: explicit column
 
     return NextResponse.json({ id: row.id });
   } catch (err) {

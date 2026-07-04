@@ -1,30 +1,41 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState, useCallback } from "react";
 import { useStore } from "@/store/useStore";
-import { SQLEditor } from "@/components/ui/SQLEditor";
-import { parsePipeline, prefixRows, nestedLoopJoin, buildSchemaString } from "@/lib/sql/engine";
+import { parsePipeline, prefixRows, nestedLoopJoin, highlightSQL } from "@/lib/sql/engine";
 import { runQuery } from "@/lib/sql/runner";
 import type { TableRow, PipelineStep } from "@/types";
 
-// ── types for animation frames ────────────────────────────────
-interface AnimFrame {
-  tables: { label: string; id: string; rows: TableRow[] }[];
+function wait(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+interface FrameTable {
+  label: string;
+  id: string;
+  rows: TableRow[];
+}
+
+interface Frame {
+  tables: FrameTable[];
+}
 
 export function VisualizerTab() {
   const {
-    visualizerSQL, setVisualizerSQL,
-    tableData, animSpeed,
-    pipeline, setPipeline, updateStepStatus,
-    queryResult, setQueryResult,
-    isRunning, setIsRunning,
-    error, setError,
+    visualizerSQL,
+    setVisualizerSQL,
+    tableData,
+    pipeline,
+    setPipeline,
+    updateStepStatus,
+    setQueryResult,
+    setError,
+    isRunning,
+    setIsRunning,
+    animSpeed,
   } = useStore();
 
-  const [frames, setFrames] = useState<AnimFrame[]>([]);
+  const [frames, setFrames] = useState<Frame[]>([]);
   const [highlightedRows, setHighlightedRows] = useState<Record<string, Set<number>>>({});
 
   const hlRow = (id: string, idx: number, add: boolean) => {
@@ -37,7 +48,7 @@ export function VisualizerTab() {
     });
   };
 
-  const run = async () => {
+  const run = useCallback(async () => {
     if (isRunning) return;
     setFrames([]);
     setHighlightedRows({});
@@ -62,12 +73,19 @@ export function VisualizerTab() {
       let stepIdx = 1;
 
       for (const step of steps.slice(1)) {
+        if (step.type === "WHERE") {
+          updateStepStatus(stepIdx, "active");
+          await wait(animSpeed);
+          updateStepStatus(stepIdx, "done");
+          stepIdx++;
+          continue;
+        }
+
         if (step.type !== "JOIN") continue;
         updateStepStatus(stepIdx, "active");
         const jRows = prefixRows(tableData[step.table!] ?? [], step.alias!);
         const joined: TableRow[] = [];
 
-        // Add join table to frame
         setFrames((prev) => [
           ...prev,
           { tables: [{ label: step.alias!, id: `vt-join-${stepIdx}`, rows: jRows }] },
@@ -103,143 +121,114 @@ export function VisualizerTab() {
     } finally {
       setIsRunning(false);
     }
-  };
+  }, [visualizerSQL, tableData, animSpeed, isRunning, setPipeline, updateStepStatus, setQueryResult, setError, setIsRunning]);
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
       {/* ── Left: editor + pipeline ── */}
-      <div
-        className="flex flex-col flex-shrink-0 overflow-hidden"
-        style={{ width: 340, borderRight: "1px solid var(--border)" }}
-      >
-        <div
-          className="flex justify-between items-center px-3 py-2 flex-shrink-0"
-          style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border)" }}
-        >
-          <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>
-            SQL Editor
-          </span>
-          <button
-            onClick={run}
-            disabled={isRunning}
-            className="px-3 py-1 rounded text-[11.5px] font-semibold text-black disabled:opacity-50"
-            style={{ background: "var(--accent)" }}
-          >
-            {isRunning ? "Running…" : "▶ Run & Visualize"}
-          </button>
-        </div>
-        <SQLEditor value={visualizerSQL} onChange={setVisualizerSQL} />
-
-        {/* Pipeline */}
-        <div
-          className="p-3 flex-shrink-0"
-          style={{ background: "var(--surface2)", borderTop: "1px solid var(--border)" }}
-        >
-          <div className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: "var(--muted)" }}>
-            Execution Plan
+      <div className="flex flex-col gap-4">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface2)] p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)]">SQL Editor</h3>
+            <div className="flex gap-2">
+              <button
+                onClick={run}
+                disabled={isRunning}
+                className="px-3 py-1.5 rounded-md bg-[var(--accent)] text-[var(--surface)] text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                {isRunning ? "Running…" : "▶ Run"}
+              </button>
+              <button
+                onClick={() => setFrames([])}
+                disabled={isRunning}
+                className="px-3 py-1.5 rounded-md border border-[var(--border)] text-sm hover:bg-[var(--surface)] transition"
+              >
+                ↺ Reset
+              </button>
+            </div>
           </div>
-          <div className="flex flex-col gap-1.5">
+
+          {/* EDITABLE TEXTAREA */}
+          <textarea
+            value={visualizerSQL}
+            onChange={(e) => setVisualizerSQL(e.target.value)}
+            className="input font-mono text-sm min-h-[200px] resize-y"
+            placeholder="Write your SQL query here..."
+            spellCheck={false}
+          />
+        </div>
+
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface2)] p-4 flex-1">
+          <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)] mb-3">Execution Plan</h3>
+          <div className="space-y-2">
             {pipeline.length === 0 ? (
-              <div className="text-[11px] py-1" style={{ color: "var(--muted)" }}>Awaiting query…</div>
+              <p className="text-sm text-[var(--muted)] italic">Awaiting query…</p>
             ) : (
-              pipeline.map((step, i) => <PipelineStepRow key={i} step={step} />)
+              pipeline.map((step, i) => <PipelineStepRow key={`step-${i}`} step={step} />)
             )}
           </div>
         </div>
 
-        {/* Error */}
-        {error && (
-          <div
-            className="px-3 py-2 text-[11.5px] font-mono flex-shrink-0"
-            style={{
-              background: "rgba(239,68,68,0.08)",
-              borderTop: "1px solid rgba(239,68,68,0.2)",
-              color: "var(--danger)",
-            }}
-          >
-            ⚠ {error}
+        {useStore.getState().error && (
+          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+            ⚠ {useStore.getState().error}
           </div>
         )}
       </div>
 
       {/* ── Right: animation stage + results ── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div
-          className="flex justify-between items-center px-3 py-2 flex-shrink-0"
-          style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border)" }}
-        >
-          <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>
-            Process Visualization
-          </span>
-        </div>
-
-        {/* Animation stage */}
-        <div className="flex-1 overflow-auto p-4 flex flex-col gap-5" style={{ background: "var(--bg)" }}>
-          {frames.length === 0 ? (
-            <EmptyStage />
-          ) : (
-            frames.map((frame, fi) =>
-              frame.tables.map((t) => (
-                <VizTable key={t.id} label={t.label} rows={t.rows} highlighted={highlightedRows[t.id] ?? new Set()} />
+      <div className="flex flex-col gap-4">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface2)] p-4 flex-1 min-h-[300px]">
+          <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)] mb-3">Process Visualization</h3>
+          <div className="space-y-4 overflow-auto max-h-[500px]">
+            {frames.length === 0 ? (
+              <EmptyStage />
+            ) : (
+              frames.map((frame, fi) => (
+                <div key={`frame-${fi}`} className="space-y-2">
+                  {frame.tables.map((t) => (
+                    <VizTable
+                      key={`${fi}-${t.id}`}
+                      label={t.label}
+                      rows={t.rows}
+                      highlighted={highlightedRows[t.id] ?? new Set()}
+                    />
+                  ))}
+                </div>
               ))
-            )
-          )}
+            )}
+          </div>
         </div>
 
-        {/* Result pane */}
-        <div
-          className="flex-shrink-0 flex flex-col"
-          style={{ height: 160, borderTop: "1px solid var(--border)", background: "var(--surface)" }}
-        >
-          <div
-            className="flex justify-between items-center px-3 py-1.5 flex-shrink-0"
-            style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border)" }}
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>
-              Output
-            </span>
-            <span className="text-[11px]" style={{ color: "var(--muted)" }}>
-              {queryResult ? `${queryResult.values.length} rows` : "—"}
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface2)] p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)]">Output</h3>
+            <span className="text-xs text-[var(--muted)]">
+              {useStore.getState().queryResult ? `${useStore.getState().queryResult!.values.length} rows` : "—"}
             </span>
           </div>
-          <div className="overflow-auto flex-1">
-            {queryResult && (
-              <table className="w-full border-collapse text-[11.5px]">
+          {useStore.getState().queryResult && (
+            <div className="overflow-auto max-h-[200px]">
+              <table className="w-full text-sm">
                 <thead>
-                  <tr>
-                    {queryResult.columns.map((c) => (
-                      <th
-                        key={c}
-                        className="sticky top-0 px-2.5 py-1.5 text-left uppercase text-[10.5px] tracking-wide font-semibold"
-                        style={{
-                          background: "var(--surface2)",
-                          borderBottom: "1px solid var(--border)",
-                          color: "var(--muted)",
-                        }}
-                      >
-                        {c}
-                      </th>
+                  <tr className="border-b border-[var(--border)]">
+                    {useStore.getState().queryResult!.columns.map((c) => (
+                      <th key={c} className="text-left p-2 font-medium text-[var(--muted)]">{c}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {queryResult.values.map((row, i) => (
-                    <tr key={i} className="flash-row">
+                  {useStore.getState().queryResult!.values.map((row, i) => (
+                    <tr key={`row-${i}`} className="border-b border-[var(--border)]/50">
                       {row.map((v, j) => (
-                        <td
-                          key={j}
-                          className="px-2.5 py-1 font-mono"
-                          style={{ borderBottom: "1px solid var(--border)" }}
-                        >
-                          {String(v ?? "")}
-                        </td>
+                        <td key={`cell-${i}-${j}`} className="p-2 font-mono text-xs">{String(v ?? "")}</td>
                       ))}
                     </tr>
                   ))}
                 </tbody>
               </table>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -251,34 +240,36 @@ export function VisualizerTab() {
 function PipelineStepRow({ step }: { step: PipelineStep }) {
   const colors: Record<PipelineStep["status"], string> = {
     pending: "var(--muted)",
-    active:  "var(--accent)",
-    done:    "var(--success)",
+    active: "var(--accent)",
+    done: "var(--success)",
   };
   const borders: Record<PipelineStep["status"], string> = {
     pending: "var(--border)",
-    active:  "var(--accent)",
-    done:    "var(--success)",
+    active: "var(--accent)",
+    done: "var(--success)",
   };
 
   return (
     <div
-      className="flex justify-between items-center px-2.5 py-1.5 rounded text-[11px] font-mono transition-all"
+      className="flex items-center gap-3 p-3 rounded-md border text-sm transition-colors duration-300"
       style={{
-        background: step.status === "active" ? "rgba(0,212,255,0.05)" : "var(--bg)",
-        border: `1px solid ${borders[step.status]}`,
-        color: colors[step.status],
+        borderColor: borders[step.status],
+        backgroundColor: step.status === "active" ? "rgba(56,189,248,0.05)" : "transparent",
       }}
     >
-      <span>
+      <span
+        className="w-2 h-2 rounded-full shrink-0"
+        style={{ backgroundColor: colors[step.status] }}
+      />
+      <span className="font-semibold" style={{ color: colors[step.status] }}>
         {step.type}
         {step.alias ? ` ${step.alias}` : ""}
       </span>
-      <span
-        className="text-[9px] px-1.5 py-0.5 rounded-full"
-        style={{ background: "rgba(255,255,255,0.05)" }}
-      >
-        {step.status}
-      </span>
+      {step.status === "active" && (
+        <span className="ml-auto text-xs animate-pulse" style={{ color: colors[step.status] }}>
+          running…
+        </span>
+      )}
     </div>
   );
 }
@@ -288,52 +279,39 @@ function VizTable({ label, rows, highlighted }: { label: string; rows: TableRow[
   const cols = Object.keys(rows[0]);
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-[9.5px] font-bold uppercase tracking-widest" style={{ color: "var(--accent)" }}>
+    <div className="rounded-md border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+      <div className="px-3 py-2 bg-[var(--surface2)] border-b border-[var(--border)] text-xs font-semibold text-[var(--muted)] uppercase tracking-wider">
         {label}
-      </span>
-      <div
-        className="overflow-auto rounded"
-        style={{ border: "1px solid var(--border)", background: "var(--surface)", maxHeight: 280 }}
-      >
-        {/* Header */}
-        <div
-          className="grid"
-          style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(60px, 1fr))` }}
-        >
-          {cols.map((c) => (
-            <div
-              key={c}
-              className="px-2 py-1 text-[10px] font-semibold font-mono truncate"
-              style={{
-                borderRight: "1px solid var(--border)",
-                borderBottom: "1px solid var(--border)",
-                background: "var(--surface2)",
-                color: "var(--muted2)",
-              }}
-            >
-              {c.includes(".") ? c.split(".")[1] : c}
-            </div>
-          ))}
-        </div>
-        {/* Rows */}
-        {rows.map((row, ri) => (
-          <div
-            key={ri}
-            className={`grid transition-colors ${highlighted.has(ri) ? "row-match" : ""}`}
-            style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(60px, 1fr))`, borderBottom: "1px solid var(--border)" }}
-          >
-            {cols.map((c) => (
-              <div
-                key={c}
-                className="px-2 py-1.5 text-[11px] font-mono truncate v-cell"
-                style={{ borderRight: "1px solid var(--border)", maxWidth: 120 }}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-[var(--border)]">
+              {cols.map((c) => (
+                <th key={`h-${c}`} className="text-left p-2 font-medium text-[var(--muted)] whitespace-nowrap">
+                  {c.includes(".") ? c.split(".")[1] : c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, ri) => (
+              <tr
+                key={`r-${ri}`}
+                className="border-b border-[var(--border)]/30 transition-colors"
+                style={{
+                  backgroundColor: highlighted.has(ri) ? "rgba(56,189,248,0.15)" : "transparent",
+                }}
               >
-                {String(row[c] ?? "")}
-              </div>
+                {cols.map((c) => (
+                  <td key={`d-${ri}-${c}`} className="p-2 whitespace-nowrap font-mono">
+                    {String(row[c] ?? "")}
+                  </td>
+                ))}
+              </tr>
             ))}
-          </div>
-        ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -341,11 +319,12 @@ function VizTable({ label, rows, highlighted }: { label: string; rows: TableRow[
 
 function EmptyStage() {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center gap-3 opacity-30">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M3 3h18v4H3z" /><path d="M3 9h18v4H3z" /><path d="M3 15h18v4H3z" />
+    <div className="flex flex-col items-center justify-center h-48 text-[var(--muted)]">
+      <svg className="w-12 h-12 mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
-      <span className="text-sm" style={{ color: "var(--muted)" }}>Run a query to visualize execution</span>
+      <p className="text-sm">Run a query to visualize execution</p>
     </div>
   );
 }

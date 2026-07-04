@@ -1,69 +1,335 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@300;400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ── CSS Custom Properties (design tokens) ── */
+/* ── Theme Tokens ───────────────────────────────────────────── */
 :root {
-  --bg:        #080c14;
-  --surface:   #0d1421;
-  --surface2:  #111827;
-  --border:    #1e2d45;
-  --border2:   #253347;
-  --accent:    #00d4ff;
-  --purple:    #7c3aed;
-  --success:   #10b981;
-  --warn:      #f59e0b;
-  --danger:    #ef4444;
-  --text:      #e2e8f0;
-  --muted:     #64748b;
-  --muted2:    #94a3b8;
-
-  /* Viz animation colours */
-  --anim-scan:  rgba(251,191,36,0.2);
-  --anim-match: rgba(16,185,129,0.2);
-
-  /* Syntax highlighting */
-  --code-kw:  #7dd3fc;
-  --code-fn:  #a78bfa;
-  --code-str: #6ee7b7;
-  --code-num: #fcd34d;
-  --code-com: #4b5563;
+  --surface: #0f172a;
+  --surface2: #1e293b;
+  --surface3: #0b1221;
+  --text: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --accent-hover: #0ea5e9;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --error: #f87171;
+  --border: #334155;
+  --border-subtle: #1e293b;
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
 }
 
-/* ── Base resets ── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root[data-theme="light"] {
+  --surface: #ffffff;
+  --surface2: #f8fafc;
+  --surface3: #f1f5f9;
+  --text: #0f172a;
+  --text-secondary: #334155;
+  --muted: #64748b;
+  --accent: #0284c7;
+  --accent-hover: #0369a1;
+  --success: #16a34a;
+  --warning: #d97706;
+  --error: #dc2626;
+  --border: #e2e8f0;
+  --border-subtle: #f1f5f9;
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+}
 
-html, body {
-  height: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 13px;
+/* ── Base ─────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Custom scrollbars ── */
-::-webkit-scrollbar        { width: 5px; height: 5px; }
-::-webkit-scrollbar-track  { background: var(--surface); }
-::-webkit-scrollbar-thumb  { background: var(--border2); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--muted); }
-
-/* ── Viz animation classes (applied via JS refs) ── */
-.row-scan  .v-cell { background: var(--anim-scan)  !important; transition: background 0.1s; }
-.row-match .v-cell { background: var(--anim-match) !important; transition: background 0.5s; }
-
-@keyframes flashGreen {
-  0%   { background: rgba(16,185,129,0.3); }
-  100% { background: transparent; }
+body {
+  background-color: var(--surface);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.6;
+  min-height: 100vh;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
-.flash-row { animation: flashGreen 0.8s ease; }
 
-@keyframes spinnerAnim { to { transform: rotate(360deg); } }
-.spinner {
-  border: 2px solid var(--border2);
-  border-top-color: var(--purple);
-  border-radius: 50%;
-  animation: spinnerAnim 0.8s linear infinite;
+/* ── Scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) var(--surface3);
+}
+
+/* ── Selection ────────────────────────────────────────────── */
+::selection {
+  background-color: var(--accent);
+  color: var(--surface);
+}
+
+/* ── Focus Ring ───────────────────────────────────────────── */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Animations ───────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 0.5; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.25s ease-out forwards;
+}
+
+.animate-spin-slow {
+  animation: spin 1.5s linear infinite;
+}
+
+/* ── Component Utilities ─────────────────────────────────── */
+@layer components {
+  .card {
+    background-color: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.2s ease, transform 0.15s ease;
+  }
+
+  .card:hover {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -4px rgba(0, 0, 0, 0.2);
+  }
+
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background-color: var(--accent);
+    color: var(--surface);
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-radius: 0.5rem;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-primary:hover {
+    background-color: var(--accent-hover);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background-color: transparent;
+    color: var(--text);
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-secondary:hover {
+    background-color: var(--surface3);
+    border-color: var(--muted);
+  }
+
+  .btn-secondary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background-color: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+  }
+
+  .input::placeholder {
+    color: var(--muted);
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+  }
+
+  .badge-success {
+    background-color: rgba(74, 222, 128, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+  }
+
+  .badge-warning {
+    background-color: rgba(251, 191, 36, 0.15);
+    color: var(--warning);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+  }
+
+  .badge-error {
+    background-color: rgba(248, 113, 113, 0.15);
+    color: var(--error);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+  }
+
+  .badge-info {
+    background-color: rgba(56, 189, 248, 0.15);
+    color: var(--accent);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+  }
+
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 1rem 0;
+  }
+
+  .code-block {
+    background-color: var(--surface3);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    font-family: "Fira Code", "SF Mono", Monaco, Consolas, monospace;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    overflow-x: auto;
+  }
+
+  .tooltip {
+    position: relative;
+  }
+
+  .tooltip::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-4px);
+    padding: 0.25rem 0.5rem;
+    background-color: var(--surface3);
+    color: var(--text);
+    font-size: 0.75rem;
+    border-radius: 0.25rem;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    border: 1px solid var(--border);
+  }
+
+  .tooltip:hover::after {
+    opacity: 1;
+  }
+}
+
+/* ── Prism Editor Override ────────────────────────────────── */
+.prism-editor textarea {
+  outline: none !important;
+}
+
+.prism-editor textarea::selection {
+  background-color: var(--accent) !important;
+  color: var(--surface) !important;
+}
+
+/* ── Recharts Override ──────────────────────────────────── */
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+
+.recharts-default-tooltip {
+  background-color: var(--surface2) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 0.5rem !important;
+  color: var(--text) !important;
+}
+
+/* ── Responsive Helpers ───────────────────────────────────── */
+@media (max-width: 1024px) {
+  .hide-mobile {
+    display: none !important;
+  }
+}
+
+@media (min-width: 1025px) {
+  .hide-desktop {
+    display: none !important;
+  }
 }

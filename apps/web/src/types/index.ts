@@ -19,6 +19,7 @@ export interface PipelineStep {
   alias?: string;
   leftKey?: string;
   rightKey?: string;
+  condition?: string;
   status: PipelineStepStatus;
 }
 

@@ -1,28 +1,30 @@
-// Copies node_modules/sql.js/dist/sql-wasm.wasm into public/.
-//
-// Why: sql.js ships a JS "glue" file (from npm, whatever version is installed)
-// and a matching .wasm binary. The previous code fetched the JS from npm but
-// the .wasm from a hardcoded CDN URL pinned to an old version (1.8.0). When
-// the two versions drift apart, sql.js throws:
-//   "both async and sync fetching of the wasm failed"
-// Serving the wasm from public/ (same origin, same version as the installed
-// package, and compatible with this app's COOP/COEP headers) fixes this for
-// good and keeps it correct automatically on every `npm install`.
 const fs = require("fs");
 const path = require("path");
 
-const src = path.join(__dirname, "..", "..", "..", "node_modules", "sql.js", "dist", "sql-wasm.wasm");
-const fallbackSrc = path.join(__dirname, "..", "node_modules", "sql.js", "dist", "sql-wasm.wasm");
+// require.resolve("sql.js") returns the main entry point
+// We need to find the package root, then go to dist/
+const sqlJsMain = require.resolve("sql.js");
+// Go up from dist/sql.js to dist/, then up to sql.js/
+const sqlJsRoot = path.dirname(path.dirname(sqlJsMain));
+const distPath = path.join(sqlJsRoot, "dist");
+
 const destDir = path.join(__dirname, "..", "public");
-const dest = path.join(destDir, "sql-wasm.wasm");
 
-const resolvedSrc = fs.existsSync(src) ? src : fallbackSrc;
-
-if (!fs.existsSync(resolvedSrc)) {
-  console.warn("[copy-wasm] Could not find sql.js's sql-wasm.wasm — is sql.js installed?");
-  process.exit(0);
+if (!fs.existsSync(destDir)) {
+  fs.mkdirSync(destDir, { recursive: true });
 }
 
-fs.mkdirSync(destDir, { recursive: true });
-fs.copyFileSync(resolvedSrc, dest);
-console.log(`[copy-wasm] Copied sql-wasm.wasm -> ${path.relative(process.cwd(), dest)}`);
+// Copy all WASM files
+const files = fs.readdirSync(distPath).filter(f => f.endsWith(".wasm"));
+
+if (files.length === 0) {
+  console.error("❌ No WASM files found in", distPath);
+  process.exit(1);
+}
+
+files.forEach(file => {
+  const src = path.join(distPath, file);
+  const dest = path.join(destDir, file);
+  fs.copyFileSync(src, dest);
+  console.log(`✅ Copied ${file} → public/${file}`);
+});

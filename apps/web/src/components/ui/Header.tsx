@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { create } from "zustand";
 import { useStore } from "@/store/useStore";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
 const TABS = [
   { id: "visualize", label: "⬡ Visualize" },
@@ -11,9 +13,6 @@ const TABS = [
 
 type TabId = typeof TABS[number]["id"];
 
-// Active tab is stored in a simple module-level atom to avoid prop drilling.
-// In a real app you'd use a URL segment or a dedicated piece of store state.
-import { create } from "zustand";
 export const useTab = create<{ tab: TabId; setTab: (t: TabId) => void }>((set) => ({
   tab: "visualize",
   setTab: (tab) => set({ tab }),
@@ -22,9 +21,19 @@ export const useTab = create<{ tab: TabId; setTab: (t: TabId) => void }>((set) =
 export function Header() {
   const { tab, setTab } = useTab();
   const {
-    isRunning, error, animSpeed, setAnimSpeed,
-    runDemo, visualizerSQL, tableData,
-    saveStatus, setSaveStatus, savedQueryId, setSavedQueryId, saveError, setSaveError,
+    isRunning,
+    error,
+    animSpeed,
+    setAnimSpeed,
+    runDemo,
+    visualizerSQL,
+    tableData,
+    saveStatus,
+    setSaveStatus,
+    savedQueryId,
+    setSavedQueryId,
+    saveError,
+    setSaveError,
   } = useStore();
   const [showShare, setShowShare] = useState(false);
 
@@ -33,7 +42,10 @@ export function Header() {
     setSaveError(null);
     setSavedQueryId(null);
     try {
-      const name = typeof window !== "undefined" ? window.prompt("Name this query:", "My query") : "My query";
+      const name =
+        typeof window !== "undefined"
+          ? window.prompt("Name this query:", "My query")
+          : "My query";
       if (!name) {
         setSaveStatus("idle");
         return;
@@ -61,23 +73,24 @@ export function Header() {
     statusState === "running"
       ? "bg-[var(--accent)] shadow-[0_0_6px_var(--accent)] animate-pulse"
       : statusState === "error"
-      ? "bg-[var(--danger)]"
+      ? "bg-[var(--error)]"
       : "bg-[var(--muted)]";
 
   return (
-    <header
-      style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}
-      className="h-12 flex items-center justify-between px-4 gap-3 flex-shrink-0"
-    >
+    <header className="h-14 flex items-center justify-between px-5 gap-3 flex-shrink-0 border-b border-[var(--border)] bg-[var(--surface)] z-40">
       {/* Brand */}
-      <div className="flex items-center gap-2 font-bold text-sm tracking-tight select-none">
+      <div className="flex items-center gap-2.5 font-bold text-sm tracking-tight select-none">
         <div
-          className="w-7 h-7 rounded-md flex items-center justify-center text-xs"
-          style={{ background: "linear-gradient(135deg,var(--accent),var(--purple))" }}
+          className="w-8 h-8 rounded-lg flex items-center justify-center text-sm shadow-lg"
+          style={{
+            background: "linear-gradient(135deg, var(--accent), #a78bfa)",
+          }}
         >
           ⚡
         </div>
-        DB<span style={{ color: "var(--accent)" }}>Optima</span>
+        <span>
+          DB<span className="text-[var(--accent)]">Optima</span>
+        </span>
       </div>
 
       {/* Tabs */}
@@ -86,12 +99,10 @@ export function Header() {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className="px-4 py-2 text-xs font-medium transition-colors rounded-none border-b-2"
+            className="px-4 py-2 text-xs font-medium transition-all duration-200 rounded-md border-b-2 bg-transparent hover:bg-[var(--surface2)]"
             style={{
               color: tab === t.id ? "var(--accent)" : "var(--muted)",
               borderBottomColor: tab === t.id ? "var(--accent)" : "transparent",
-              background: "transparent",
-              cursor: "pointer",
             }}
           >
             {t.label}
@@ -101,26 +112,29 @@ export function Header() {
 
       {/* Controls */}
       <div className="flex items-center gap-3">
+        <ThemeToggle />
+
         <button
           onClick={() => {
             setTab("ai");
             runDemo();
           }}
-          className="px-3 py-1 rounded text-[11px] font-semibold"
-          style={{ border: "1px solid rgba(167,139,250,0.4)", color: "#a78bfa" }}
+          className="btn-secondary text-[11px] font-semibold"
+          style={{ color: "#a78bfa", borderColor: "rgba(167,139,250,0.4)" }}
           title="Load a bad query and watch the AI Optimizer fix it"
         >
           ▶ Run Demo
         </button>
+
         <button
           onClick={handleSave}
           disabled={saveStatus === "saving"}
-          className="px-3 py-1 rounded text-[11px] font-semibold disabled:opacity-50"
-          style={{ border: "1px solid var(--border2)", color: "var(--muted2)" }}
+          className="btn-secondary text-[11px] font-semibold disabled:opacity-50"
         >
           {saveStatus === "saving" ? "Saving…" : "🔗 Save & Share"}
         </button>
-        <div className="flex items-center gap-2 text-xs" style={{ color: "var(--muted)" }}>
+
+        <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
           <span>Speed</span>
           <input
             type="range"
@@ -129,10 +143,14 @@ export function Header() {
             value={Math.round(11 - animSpeed / 80)}
             onChange={(e) => setAnimSpeed((11 - Number(e.target.value)) * 80)}
             className="w-20 cursor-pointer accent-[var(--accent)]"
+            title="Animation speed"
           />
         </div>
-        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
-        <span className="text-xs" style={{ color: "var(--muted)" }}>{statusLabel}</span>
+
+        <div className="flex items-center gap-2 pl-2 border-l border-[var(--border)]">
+          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
+          <span className="text-xs text-[var(--muted)]">{statusLabel}</span>
+        </div>
       </div>
 
       {showShare && (
@@ -146,55 +164,72 @@ export function Header() {
   );
 }
 
-function ShareModal({ id, error, onClose }: { id: number | null; error: string | null; onClose: () => void }) {
-  const url = id && typeof window !== "undefined" ? `${window.location.origin}/q/${id}` : "";
+function ShareModal({
+  id,
+  error,
+  onClose,
+}: {
+  id: number | null;
+  error: string | null;
+  onClose: () => void;
+}) {
+  const url =
+    id && typeof window !== "undefined"
+      ? `${window.location.origin}/q/${id}`
+      : "";
+
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center z-50"
-      style={{ background: "rgba(0,0,0,0.6)" }}
+      className="fixed inset-0 flex items-center justify-center z-50 backdrop-blur-sm"
+      style={{ background: "rgba(0,0,0,0.5)" }}
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="rounded-lg p-5 w-[380px]"
-        style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}
+        className="rounded-xl p-6 w-[400px] shadow-2xl border border-[var(--border)] bg-[var(--surface2)]"
       >
         {error ? (
-          <>
-            <div className="text-[13px] font-semibold mb-2" style={{ color: "var(--danger)" }}>Couldn&apos;t save</div>
-            <div className="text-[11.5px] font-mono mb-4" style={{ color: "var(--muted)" }}>{error}</div>
-            <div className="text-[11px]" style={{ color: "var(--muted)" }}>
-              Saving requires a Postgres connection. Set <span className="font-mono">DATABASE_URL</span> (see{" "}
-              <span className="font-mono">docker/docker-compose.yml</span>) and run{" "}
-              <span className="font-mono">npm run db:push</span>.
+          <div className="space-y-3">
+            <div className="text-sm font-semibold text-[var(--error)]">
+              Couldn&apos;t save
             </div>
-          </>
+            <div className="text-xs font-mono text-[var(--muted)] bg-[var(--surface3)] p-3 rounded-md">
+              {error}
+            </div>
+            <div className="text-xs text-[var(--muted)] leading-relaxed">
+              Saving requires a Postgres connection. Set{" "}
+              <code className="text-[var(--accent)]">DATABASE_URL</code> (see{" "}
+              <code className="text-[var(--accent)]">docker/docker-compose.yml</code>) and run{" "}
+              <code className="text-[var(--accent)]">npm run db:push</code>.
+            </div>
+          </div>
         ) : (
-          <>
-            <div className="text-[13px] font-semibold mb-2" style={{ color: "var(--success)" }}>Saved!</div>
-            <div className="text-[11px] mb-2" style={{ color: "var(--muted)" }}>Share this link — it reloads your exact query and schema:</div>
+          <div className="space-y-3">
+            <div className="text-sm font-semibold text-[var(--success)]">
+              Saved!
+            </div>
+            <div className="text-xs text-[var(--muted)]">
+              Share this link — it reloads your exact query and schema:
+            </div>
             <div className="flex gap-2">
               <input
                 readOnly
                 value={url}
-                className="flex-1 px-2 py-1.5 text-[11px] font-mono rounded"
-                style={{ background: "var(--bg)", border: "1px solid var(--border2)", color: "var(--text)" }}
+                className="input flex-1 text-[11px] font-mono"
                 onFocus={(e) => e.target.select()}
               />
               <button
                 onClick={() => navigator.clipboard.writeText(url)}
-                className="px-2.5 py-1.5 rounded text-[11px] font-semibold text-black"
-                style={{ background: "var(--accent)" }}
+                className="btn-primary text-[11px] px-3"
               >
                 Copy
               </button>
             </div>
-          </>
+          </div>
         )}
         <button
           onClick={onClose}
-          className="w-full mt-4 py-1.5 rounded text-[11px]"
-          style={{ border: "1px solid var(--border2)", color: "var(--muted2)" }}
+          className="w-full mt-5 py-2 rounded-lg text-xs font-medium border border-[var(--border)] text-[var(--muted)] hover:bg-[var(--surface3)] transition"
         >
           Close
         </button>
