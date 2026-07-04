@@ -1,6 +1,26 @@
 import { describe, it, expect } from "vitest";
 import { parseCreateTableStatements, importSchemaFromSQL } from "./schemaImport";
 
+const EMPLOYEE_PROJECT_DDL = `
+  CREATE TABLE project (
+      Project_ID VARCHAR(10) PRIMARY KEY,
+      Project_Name VARCHAR(150) NOT NULL,
+      Department VARCHAR(50) NOT NULL,
+      Budget DECIMAL(12, 2) NOT NULL,
+      Start_Date DATE NOT NULL,
+      End_Date DATE,
+      Lead_Employee_ID VARCHAR(10),
+      FOREIGN KEY (Lead_Employee_ID) REFERENCES employee(Employee_ID)
+  );
+  CREATE TABLE employee (
+      Employee_ID VARCHAR(10) PRIMARY KEY,
+      Name VARCHAR(100) NOT NULL,
+      Department VARCHAR(50) NOT NULL,
+      Salary DECIMAL(10, 2) NOT NULL,
+      Join_Date DATE NOT NULL
+  );
+`;
+
 describe("parseCreateTableStatements", () => {
   it("parses a single simple table", () => {
     const { tables, errors } = parseCreateTableStatements(
@@ -78,6 +98,149 @@ describe("parseCreateTableStatements", () => {
     );
     expect(tables).toEqual([]);
     expect(errors.some((e) => e.includes("empty_thing"))).toBe(true);
+  });
+});
+
+describe("foreign key parsing", () => {
+  it("extracts a table-level FOREIGN KEY constraint", () => {
+    const { tables } = parseCreateTableStatements(`
+      CREATE TABLE orders (
+        id INTEGER,
+        customer_id INTEGER,
+        FOREIGN KEY (customer_id) REFERENCES customers(id)
+      );
+    `);
+    expect(tables[0].foreignKeys).toEqual([
+      { column: "customer_id", refTable: "customers", refColumn: "id" },
+    ]);
+    // and it's still excluded from the regular column list
+    expect(tables[0].columns.map((c) => c.name)).toEqual(["id", "customer_id"]);
+  });
+
+  it("extracts an inline REFERENCES clause on a column definition", () => {
+    const { tables } = parseCreateTableStatements(`
+      CREATE TABLE orders (
+        id INTEGER,
+        customer_id INTEGER REFERENCES customers(id)
+      );
+    `);
+    expect(tables[0].foreignKeys).toEqual([
+      { column: "customer_id", refTable: "customers", refColumn: "id" },
+    ]);
+    // the column itself is still parsed normally
+    expect(tables[0].columns.map((c) => c.name)).toEqual(["id", "customer_id"]);
+  });
+
+  it("handles the exact employee/project DDL, including quoting and multiple FKs", () => {
+    const { tables } = parseCreateTableStatements(EMPLOYEE_PROJECT_DDL);
+    const project = tables.find((t) => t.name === "project")!;
+    expect(project.foreignKeys).toEqual([
+      { column: "Lead_Employee_ID", refTable: "employee", refColumn: "Employee_ID" },
+    ]);
+    const employee = tables.find((t) => t.name === "employee")!;
+    expect(employee.foreignKeys).toEqual([]);
+  });
+
+  it("returns no foreign keys when none are declared", () => {
+    const { tables } = parseCreateTableStatements(
+      `CREATE TABLE customers (id INTEGER, name TEXT);`
+    );
+    expect(tables[0].foreignKeys).toEqual([]);
+  });
+});
+
+describe("importSchemaFromSQL — foreign key alignment", () => {
+  it("aligns a FK column to real values from the referenced table, even when the child table is declared first", () => {
+    const result = importSchemaFromSQL(EMPLOYEE_PROJECT_DDL);
+    const employeeIds = result.tables["employee"].map((r) => r.Employee_ID);
+    const leadIds = result.tables["project"].map((r) => r.Lead_Employee_ID);
+
+    // Every generated Lead_Employee_ID must be one of the real Employee_ID values.
+    for (const id of leadIds) {
+      expect(employeeIds).toContain(id);
+    }
+
+    // Sanity check against the old broken behavior (independent placeholders
+    // like "Lead_Employee_ID_1" that could never match "Employee_ID_1").
+    expect(leadIds.some((id) => String(id).startsWith("Lead_Employee_ID_"))).toBe(false);
+
+    // A join on this key should therefore actually produce matches.
+    const matches = result.tables["project"].filter((p) =>
+      employeeIds.includes(p.Lead_Employee_ID)
+    );
+    expect(matches.length).toBe(result.tables["project"].length);
+  });
+
+  it("leaves the FK column's placeholder value alone if the referenced table was never parsed", () => {
+    const result = importSchemaFromSQL(`
+      CREATE TABLE orders (
+        id INTEGER,
+        customer_id INTEGER,
+        FOREIGN KEY (customer_id) REFERENCES customers(id)
+      );
+    `);
+    // "customers" doesn't exist in this snippet, so alignment has nothing to
+    // pull from — the column should still be present with its fallback value
+    // rather than throwing or disappearing.
+    expect(result.tables["orders"]).toHaveLength(5);
+    for (const row of result.tables["orders"]) {
+      expect(row.customer_id).not.toBeNull();
+      expect(row.customer_id).toBeDefined();
+    }
+  });
+
+  it("is case-insensitive when matching the referenced table name", () => {
+    const result = importSchemaFromSQL(`
+      CREATE TABLE Orders (
+        id INTEGER,
+        customer_id INTEGER,
+        FOREIGN KEY (customer_id) REFERENCES CUSTOMERS(id)
+      );
+      CREATE TABLE customers (
+        id INTEGER,
+        name TEXT
+      );
+    `);
+    const customerIds = result.tables["customers"].map((r) => r.id);
+    const fkIds = result.tables["Orders"].map((r) => r.customer_id);
+    for (const id of fkIds) {
+      expect(customerIds).toContain(id);
+    }
+  });
+
+  it("strips a schema-qualified prefix from the referenced table (dbo.employee)", () => {
+    const { tables } = parseCreateTableStatements(`
+      CREATE TABLE project (
+        id INT,
+        lead_id INT,
+        FOREIGN KEY (lead_id) REFERENCES dbo.employee(id)
+      );
+    `);
+    expect(tables[0].foreignKeys).toEqual([
+      { column: "lead_id", refTable: "employee", refColumn: "id" },
+    ]);
+
+    const result = importSchemaFromSQL(`
+      CREATE TABLE project (id INT, lead_id INT, FOREIGN KEY (lead_id) REFERENCES dbo.employee(id));
+      CREATE TABLE employee (id INT, name TEXT);
+    `);
+    const employeeIds = result.tables["employee"].map((r) => r.id);
+    for (const id of result.tables["project"].map((r) => r.lead_id)) {
+      expect(employeeIds).toContain(id);
+    }
+  });
+
+  it("is case-insensitive when matching the referenced column name", () => {
+    // The REFERENCES clause spells the column EMPLOYEE_ID, but the actual
+    // declared PK column is Employee_ID — alignment should still resolve it.
+    const result = importSchemaFromSQL(`
+      CREATE TABLE project (id INT, lead_id VARCHAR(10), FOREIGN KEY (lead_id) REFERENCES employee(EMPLOYEE_ID));
+      CREATE TABLE employee (Employee_ID VARCHAR(10) PRIMARY KEY, name TEXT);
+    `);
+    const employeeIds = result.tables["employee"].map((r) => r.Employee_ID);
+    for (const id of result.tables["project"].map((r) => r.lead_id)) {
+      expect(employeeIds).toContain(id);
+    }
   });
 });
 

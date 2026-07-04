@@ -63,12 +63,25 @@ describe("nestedLoopJoin", () => {
   });
 
   it("falls back to the first column when the given key is missing on a row", () => {
-    // nestedLoopJoin falls back to Object.values(row)[0] when leftKey/rightKey
+    // nestedLoopJoin falls back to the row's first column when leftKey/rightKey
     // aren't present on a row — this keeps the visualizer resilient when the
     // regex-based parser can't resolve a column name. Here rightKey doesn't
     // exist on `customers`, so it falls back to `id` (first column), which is
     // exactly what we'd want for an unqualified join column.
     const matches = [...nestedLoopJoin(orders, customers, "customer_id", "does_not_exist")];
+    expect(matches).toHaveLength(3);
+  });
+
+  it("handles an unqualified ON clause against alias-prefixed rows end to end", () => {
+    // Reproduces the real failure mode: `JOIN customers c ON customer_id = id`
+    // (no alias prefix) means parsePipeline yields leftKey/rightKey without
+    // the "alias." prefix that prefixRows() adds to every row, so neither key
+    // literally exists on the prefixed rows. Without the fallback this always
+    // produced zero matches even though the same query, run for real via
+    // sql.js, would return actual rows.
+    const prefixedOrders = prefixRows(orders, "o");
+    const prefixedCustomers = prefixRows(customers, "c");
+    const matches = [...nestedLoopJoin(prefixedOrders, prefixedCustomers, "customer_id", "id")];
     expect(matches).toHaveLength(3);
   });
 });

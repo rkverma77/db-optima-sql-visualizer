@@ -159,6 +159,23 @@ export interface JoinMatch {
   bIdx: number;
 }
 
+/**
+ * Resolves a join key against a row's actual keys:
+ *  1. Exact match (handles alias-qualified keys like "o.customer_id").
+ *  2. Suffix match on the unprefixed column name (handles an *unqualified*
+ *     ON clause, e.g. `ON customer_id = id`, against rows that prefixKeys()
+ *     has already turned into "o.customer_id" / "c.id" — this is the common
+ *     real-world case the regex-based ON-clause parser can't always resolve).
+ *  3. First column on the row, as a last-resort fallback so the animation
+ *     still finds *something* rather than silently matching nothing.
+ */
+function resolveJoinKey(row: TableRow, key: string): string {
+  if (key in row) return key;
+  const suffixMatch = Object.keys(row).find((k) => k.split(".").pop() === key);
+  if (suffixMatch) return suffixMatch;
+  return Object.keys(row)[0];
+}
+
 export function* nestedLoopJoin(
   left: TableRow[],
   right: TableRow[],
@@ -166,13 +183,19 @@ export function* nestedLoopJoin(
   rightKey: string
 ): Generator<JoinMatch> {
   for (let a = 0; a < left.length; a++) {
+    const rowA = left[a];
+    const resolvedLeftKey = resolveJoinKey(rowA, leftKey);
+
     for (let b = 0; b < right.length; b++) {
-      const vA = left[a][leftKey];
-      const vB = right[b][rightKey];
+      const rowB = right[b];
+      const resolvedRightKey = resolveJoinKey(rowB, rightKey);
+
+      const vA = rowA[resolvedLeftKey];
+      const vB = rowB[resolvedRightKey];
 
       // Strict: both keys must exist and match
       if (vA != null && vB != null && String(vA) === String(vB)) {
-        yield { merged: { ...left[a], ...right[b] }, aIdx: a, bIdx: b };
+        yield { merged: { ...rowA, ...rowB }, aIdx: a, bIdx: b };
       }
     }
   }

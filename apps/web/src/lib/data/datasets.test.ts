@@ -33,4 +33,41 @@ describe("generateSyntheticData", () => {
     const b = generateSyntheticData(base, 200);
     expect(a).toEqual(b);
   });
+
+  it("recognizes PascalCase/UPPER id and FK columns (Project_ID, Lead_Employee_ID), not just lowercase id/_id", () => {
+    const pascalBase = {
+      Employees: [
+        { Employee_ID: 1, Name: "Alice" },
+        { Employee_ID: 2, Name: "Bob" },
+      ],
+      Projects: [
+        { Project_ID: 1, Lead_Employee_ID: 1 },
+        { Project_ID: 2, Lead_Employee_ID: 2 },
+      ],
+    };
+    const scaled = generateSyntheticData(pascalBase, 200);
+
+    // The table's own PK must stay a unique, sequential integer — not get
+    // corrupted into a random decimal by the generic numeric-noise branch.
+    const projectIds = scaled.Projects.map((r) => r.Project_ID);
+    expect(projectIds).toEqual(projectIds.map((_, i) => i + 1));
+
+    // The FK column must reference real Employee_ID values.
+    const employeeIds = new Set(scaled.Employees.map((r) => r.Employee_ID));
+    for (const p of scaled.Projects) {
+      expect(employeeIds.has(p.Lead_Employee_ID as number)).toBe(true);
+    }
+  });
+
+  it("treats a table's own PK named <table>_id as sequential, not a self-referencing random FK", () => {
+    // "Project_ID" on the "Projects" table pluralizes back to the table's
+    // own name — this must resolve to the row's own sequential id, not a
+    // guessed foreign key reference (which would produce random, repeated,
+    // non-unique values for what's supposed to be a primary key).
+    const base2 = { Projects: [{ Project_ID: 1, Name: "Alpha" }, { Project_ID: 2, Name: "Beta" }] };
+    const scaled = generateSyntheticData(base2, 500);
+    const ids = scaled.Projects.map((r) => r.Project_ID);
+    expect(new Set(ids).size).toBe(ids.length); // all unique
+    expect(ids).toEqual(ids.map((_, i) => i + 1)); // sequential
+  });
 });

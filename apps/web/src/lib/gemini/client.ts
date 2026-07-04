@@ -55,7 +55,7 @@ ${sql}`;
   const result = await model.generateContent(prompt);
   const text = result.response.text().trim();
 
-  const clean = text.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+  const clean = text.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
 
   let parsedJson: unknown;
   try {
@@ -95,7 +95,7 @@ ${sql}`;
 
   const result = await model.generateContent(prompt);
   const text = result.response.text().trim();
-  const clean = text.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+  const clean = text.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
 
   let parsedJson: unknown;
   try {

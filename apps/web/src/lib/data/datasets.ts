@@ -121,15 +121,28 @@ export function generateSyntheticData(base: TableData, targetRows: number): Tabl
       const row: Record<string, string | number | null> = {};
 
       for (const col of cols) {
-        if (col === "id") {
+        const lowerCol = col.toLowerCase();
+        if (lowerCol === "id") {
           row[col] = i + 1;
-        } else if (col.endsWith("_id")) {
-          // Reference another (guessed) table by pluralizing the FK prefix
+        } else if (lowerCol.endsWith("_id")) {
+          // Reference another (guessed) table by pluralizing the FK prefix.
+          // Comparisons are case-insensitive so PascalCase/UPPER_ID naming
+          // (e.g. "Lead_Employee_ID") is still recognized as a key column
+          // instead of falling through to the generic numeric-noise branch
+          // below, which would corrupt it into random decimals.
           const refTableGuess = tableNames.find(
-            (t) => t.toLowerCase() === col.replace(/_id$/, "").toLowerCase() + "s"
+            (t) => t.toLowerCase() === lowerCol.replace(/_id$/, "") + "s"
           );
-          const refCount = refTableGuess ? idCounts[refTableGuess] : n;
-          row[col] = 1 + Math.floor(rand() * Math.max(1, refCount));
+          if (refTableGuess === tbl) {
+            // The guess resolved to THIS table (e.g. "Project_ID" on the
+            // "Projects" table) — that's the table's own primary key, not a
+            // foreign key pointing elsewhere, so it must stay unique and
+            // sequential rather than a randomly repeated reference.
+            row[col] = i + 1;
+          } else {
+            const refCount = refTableGuess ? idCounts[refTableGuess] : n;
+            row[col] = 1 + Math.floor(rand() * Math.max(1, refCount));
+          }
         } else if (typeof seedRow[col] === "number") {
           const base = seedRow[col] as number;
           row[col] = Math.round(base * (0.5 + rand()) * 100) / 100;

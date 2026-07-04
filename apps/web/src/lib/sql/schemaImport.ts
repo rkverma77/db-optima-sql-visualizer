@@ -17,9 +17,19 @@ export interface ParsedColumn {
   type: string;
 }
 
+export interface ParsedForeignKey {
+  /** Column in THIS table that holds the reference. */
+  column: string;
+  /** Table being referenced. */
+  refTable: string;
+  /** Column in the referenced table (usually its primary key). */
+  refColumn: string;
+}
+
 export interface ParsedTable {
   name: string;
   columns: ParsedColumn[];
+  foreignKeys: ParsedForeignKey[];
 }
 
 export interface SchemaImportResult {
@@ -61,6 +71,60 @@ function splitTopLevel(str: string): string[] {
 
 function unquoteIdentifier(raw: string): string {
   return raw.replace(/^[`"'\[]/, "").replace(/[`"'\]]$/, "");
+}
+
+const IDENT = "[`\"'\\[]?[A-Za-z_][A-Za-z0-9_]*[`\"'\\]]?";
+// A REFERENCES target may be schema-qualified (e.g. `dbo.employee`,
+// `public."Employee"`) — capture the optional `schema.` prefix but keep only
+// the bare table name, since that's what this app's flat table-name map uses.
+const REF_TABLE = `(?:${IDENT}\\s*\\.\\s*)?(${IDENT})`;
+
+// Table-level form: FOREIGN KEY (col) REFERENCES table(col)
+const TABLE_LEVEL_FK = new RegExp(
+  `^FOREIGN\\s+KEY\\s*\\(\\s*(${IDENT})\\s*\\)\\s*REFERENCES\\s+${REF_TABLE}\\s*\\(\\s*(${IDENT})\\s*\\)`,
+  "i"
+);
+
+// Inline form: col_name TYPE ... REFERENCES table(col)  (e.g. as part of a column def)
+const INLINE_FK = new RegExp(
+  `REFERENCES\\s+${REF_TABLE}\\s*\\(\\s*(${IDENT})\\s*\\)`,
+  "i"
+);
+
+/**
+ * Extracts a foreign key relationship from one top-level comma-separated
+ * piece of a CREATE TABLE body, whether it's a standalone table-level
+ * constraint (`FOREIGN KEY (col) REFERENCES tbl(col)`) or an inline
+ * `REFERENCES` clause tacked onto a column definition
+ * (`col_id INTEGER REFERENCES tbl(col)`).
+ */
+function extractForeignKey(def: string): ParsedForeignKey | null {
+  const trimmed = def.trim();
+
+  const tableLevel = trimmed.match(TABLE_LEVEL_FK);
+  if (tableLevel) {
+    return {
+      column: unquoteIdentifier(tableLevel[1]),
+      refTable: unquoteIdentifier(tableLevel[2]),
+      refColumn: unquoteIdentifier(tableLevel[3]),
+    };
+  }
+
+  // Inline REFERENCES only makes sense on an actual column definition line
+  // (not on other constraint lines like UNIQUE/CHECK), and the column name
+  // is whatever parseColumnDef would extract from the same string.
+  if (CONSTRAINT_LINE.test(trimmed)) return null;
+  const inline = trimmed.match(INLINE_FK);
+  if (!inline) return null;
+
+  const col = parseColumnDef(trimmed);
+  if (!col) return null;
+
+  return {
+    column: col.name,
+    refTable: unquoteIdentifier(inline[1]),
+    refColumn: unquoteIdentifier(inline[2]),
+  };
 }
 
 function parseColumnDef(def: string): ParsedColumn | null {
@@ -118,14 +182,18 @@ export function parseCreateTableStatements(sqlText: string): {
     }
 
     const body = sql.slice(openParenIdx + 1, i);
-    const columns = splitTopLevel(body)
+    const parts = splitTopLevel(body);
+    const columns = parts
       .map(parseColumnDef)
       .filter((c): c is ParsedColumn => c !== null);
+    const foreignKeys = parts
+      .map(extractForeignKey)
+      .filter((fk): fk is ParsedForeignKey => fk !== null);
 
     if (columns.length === 0) {
       errors.push(`No columns found in CREATE TABLE "${tableName}" — skipped.`);
     } else {
-      tables.push({ name: tableName, columns });
+      tables.push({ name: tableName, columns, foreignKeys });
     }
 
     headerRe.lastIndex = i + 1;
@@ -190,6 +258,48 @@ export function importSchemaFromSQL(sqlText: string): SchemaImportResult {
     }
     tables[table.name] = rows;
     tableNames.push(table.name);
+  }
+
+  // ── FK alignment pass ──────────────────────────────────────
+  // sampleValue() above generates every column's placeholder values in
+  // isolation, so a foreign-key column (e.g. Lead_Employee_ID) and the
+  // primary key it references (Employee_ID) end up as independently
+  // generated strings/numbers that never equal each other — any JOIN
+  // between them would silently return zero rows. Now that every table's
+  // base rows exist, overwrite each FK column with real values pulled from
+  // its referenced table, so joins actually have matches to find.
+  //
+  // Table name lookups are case-insensitive since REFERENCES clauses don't
+  // always match the referenced table's declared case exactly.
+  const tableNameByLower = new Map<string, string>();
+  for (const name of tableNames) tableNameByLower.set(name.toLowerCase(), name);
+
+  for (const table of parsedTables) {
+    if (!table.foreignKeys.length) continue;
+    const rows = tables[table.name];
+
+    for (const fk of table.foreignKeys) {
+      const refTableName = tableNameByLower.get(fk.refTable.toLowerCase());
+      if (!refTableName) continue; // references a table we never parsed — leave placeholder value
+      const refRows = tables[refTableName];
+      if (!refRows || refRows.length === 0) continue;
+
+      // Column casing in a REFERENCES clause doesn't always match the
+      // declared casing of the referenced column exactly, so resolve it
+      // case-insensitively against the referenced table's actual columns.
+      const refColumnKey =
+        Object.keys(refRows[0]).find(
+          (k) => k.toLowerCase() === fk.refColumn.toLowerCase()
+        ) ?? fk.refColumn;
+
+      const refValues = refRows.map((r) => r[refColumnKey]).filter((v) => v !== undefined);
+      if (refValues.length === 0) continue; // referenced column doesn't exist on that table
+
+      rows.forEach((row, i) => {
+        if (!(fk.column in row)) return; // FK column wasn't actually declared as a column
+        row[fk.column] = refValues[i % refValues.length];
+      });
+    }
   }
 
   return { tables, tableNames, errors };
