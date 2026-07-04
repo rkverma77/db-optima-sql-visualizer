@@ -12,8 +12,7 @@
     "lint": "npm run lint --workspace=apps/web",
     "type-check": "npm run type-check --workspace=apps/web",
     "test": "npm run test --workspace=apps/web",
-    "db:push": "drizzle-kit push --config=drizzle.config.ts",
-    "postinstall": "node scripts/copy-wasm.js"
+    "db:push": "drizzle-kit push --config=drizzle.config.ts"
   },
   "engines": {
     "node": ">=18.0.0",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useStore } from "@/store/useStore";
 import { buildSchemaString } from "@/lib/sql/engine";
 import { explainQueryPlan, verifyIndexImpact } from "@/lib/sql/runner";
@@ -28,10 +28,17 @@ export function OptimizerTab() {
     setVerifyError,
   } = useStore();
 
+  // Snapshot of the query as it was when "Optimize with AI" was last clicked.
+  // Deliberately NOT the live `aiSQL` value — this is what actually got
+  // analyzed, so it stays put (for comparison against the AI's suggestions)
+  // even if the user keeps editing the query above afterwards.
+  const [submittedSQL, setSubmittedSQL] = useState<string | null>(null);
+
   // ── Run AI Analysis ──
   const runOptimize = useCallback(async () => {
     if (!aiSQL.trim() || aiLoading) return;
 
+    setSubmittedSQL(aiSQL);
     setAiLoading(true);
     setAiError(null);
     setAiResult(null);
@@ -147,15 +154,22 @@ export function OptimizerTab() {
           </div>
         )}
 
-        {/* Original query preview */}
-        <div className="card p-4">
-          <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)] mb-3">
-            Original Query
-          </h3>
-          <pre className="code-block">
-            <code dangerouslySetInnerHTML={{ __html: highlightSQL(aiSQL) }} />
-          </pre>
-        </div>
+        {/* Original query preview — snapshot of what was actually analyzed,
+            not a live mirror of the editor above. Only shown once there's
+            something to compare against. */}
+        {submittedSQL !== null && (
+          <div className="card p-4">
+            <h3 className="font-semibold text-sm uppercase tracking-wider text-[var(--muted)] mb-3">
+              Original Query
+              <span className="ml-2 normal-case font-normal text-[10px] text-[var(--muted)]/70">
+                (as submitted — edit above and re-run to update)
+              </span>
+            </h3>
+            <pre className="code-block">
+              <code dangerouslySetInnerHTML={{ __html: highlightSQL(submittedSQL) }} />
+            </pre>
+          </div>
+        )}
       </div>
 
       {/* ── Right: Results ── */}
