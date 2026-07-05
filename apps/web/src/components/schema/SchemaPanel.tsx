@@ -70,6 +70,34 @@ export function SchemaPanel() {
     e.target.value = "";
   };
 
+  const handleExportCSV = (tbl: string) => {
+    const rows = tableData[tbl];
+    if (!rows || !rows.length) return;
+    const cols = Object.keys(rows[0]);
+
+    const escape = (v: string | number | null) => {
+      const s = v == null ? "" : String(v);
+      // Quote any value containing a comma, quote, or newline; double up
+      // embedded quotes per RFC 4180 so the CSV round-trips cleanly.
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const csv = [
+      cols.map(escape).join(","),
+      ...rows.map((r) => cols.map((c) => escape(r[c])).join(",")),
+    ].join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${tbl}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <>
     {/* `h-full min-h-0` on the aside, plus `min-h-0` on the scrolling child
@@ -150,22 +178,32 @@ export function SchemaPanel() {
             >
               {/* Table header */}
               <div
-                className="flex justify-between items-center px-2.5 py-2"
+                className="flex items-center px-2.5 py-2"
                 style={{ background: "var(--surface3)", borderBottom: "1px solid var(--border)" }}
               >
                 <span className="font-mono text-[11.5px] font-bold" style={{ color: "var(--accent)" }}>
                   {tbl}
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    onClick={() => handleExportCSV(tbl)}
+                    title={`Download ${tbl} as CSV`}
+                    className="text-[9.5px] font-semibold px-1.5 py-0.5 rounded-md transition-colors hover:opacity-80"
+                    style={{ color: "var(--accent)", background: "var(--surface)", border: "1px solid var(--border)" }}
+                  >
+                    ⬇ Export CSV
+                  </button>
                   <span
-                    className="text-[9.5px] font-semibold px-1.5 py-0.5 rounded-full"
+                    className="text-[9.5px] font-semibold px-1.5 py-0.5 rounded-md"
                     style={{ color: "var(--muted)", background: "var(--surface)", border: "1px solid var(--border)" }}
                   >
                     {rows.length} rows
                   </span>
                   <button
                     onClick={() => dropTable(tbl)}
-                    className="btn-danger-ghost"
+                    title={`Delete table "${tbl}"`}
+                    className="btn-danger-ghost !rounded-full"
+                    style={{ color: "var(--error)", borderColor: "color-mix(in srgb, var(--error) 40%, transparent)" }}
                   >
                     ✕
                   </button>
@@ -282,18 +320,20 @@ export function SchemaPanel() {
                   {cols.map((col) => (
                     <div
                       key={col}
-                      className="flex items-center justify-center py-1"
+                      className="flex items-center justify-center py-0.5"
                       style={{ boxShadow: "inset -1px 0 0 var(--border)" }}
                     >
-                      <button
-                        onClick={() => dropColumn(tbl, col)}
-                        disabled={cols.length <= 1}
-                        title={cols.length <= 1 ? "A table needs at least one column" : `Remove column "${col}"`}
-                        className="btn-danger-ghost !text-[10px] disabled:opacity-30"
-                        style={{ color: cols.length <= 1 ? undefined : "var(--error)" }}
-                      >
-                        ×
-                      </button>
+                      <div className="flex items-center justify-center" style={{ width: 20, height: 20 }}>
+                        <button
+                          onClick={() => dropColumn(tbl, col)}
+                          disabled={cols.length <= 1}
+                          title={cols.length <= 1 ? "A table needs at least one column" : `Remove column "${col}"`}
+                          className="btn-danger-ghost !text-[9px] !p-0 disabled:opacity-30"
+                          style={{ color: cols.length <= 1 ? undefined : "var(--error)" }}
+                        >
+                          ×
+                        </button>
+                      </div>
                     </div>
                   ))}
                   <div

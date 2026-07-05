@@ -85,6 +85,24 @@ export function VisualizerTab() {
           continue;
         }
 
+        if (step.type === "SUBQUERY") {
+          // Correlated subqueries re-run once per outer row inside SQLite
+          // itself — there's no two-table nested-loop match to animate the
+          // way a JOIN has. The best we can show is *which* table each
+          // per-row lookup hits, so the pipeline doesn't look like it
+          // jumps straight from WHERE to the final result.
+          updateStepStatus(stepIdx, "active");
+          const sqRows = prefixRows(tableData[step.table!] ?? [], step.alias!);
+          setFrames((prev) => [
+            ...prev,
+            { tables: [{ label: `Subquery → ${step.table}`, id: `vt-subq-${stepIdx}`, rows: sqRows }] },
+          ]);
+          await wait(animSpeed * 0.6);
+          updateStepStatus(stepIdx, "done");
+          stepIdx++;
+          continue;
+        }
+
         if (step.type !== "JOIN") continue;
         updateStepStatus(stepIdx, "active");
         const jRows = prefixRows(tableData[step.table!] ?? [], step.alias!);
@@ -157,7 +175,7 @@ export function VisualizerTab() {
             value={visualizerSQL}
             onChange={setVisualizerSQL}
             placeholder="Write your SQL query here..."
-            minHeight={340}
+            minHeight={520}
           />
         </div>
 
@@ -166,11 +184,18 @@ export function VisualizerTab() {
             <span className="panel-dot" style={{ background: "var(--accent-violet)" }} />
             Execution Plan
           </h3>
-          <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
             {pipeline.length === 0 ? (
               <p className="text-sm text-[var(--muted)] italic">Awaiting query…</p>
             ) : (
-              pipeline.map((step, i) => <PipelineStepRow key={`step-${i}`} step={step} />)
+              pipeline.map((step, i) => (
+                <div key={`step-${i}`} className="flex items-center gap-1.5">
+                  <PipelineStepChip step={step} />
+                  {i < pipeline.length - 1 && (
+                    <span className="text-[var(--muted)] text-sm select-none">→</span>
+                  )}
+                </div>
+              ))
             )}
           </div>
         </div>
@@ -293,7 +318,7 @@ export function VisualizerTab() {
 
 // ── Sub-components ────────────────────────────────────────────
 
-function PipelineStepRow({ step }: { step: PipelineStep }) {
+function PipelineStepChip({ step }: { step: PipelineStep }) {
   const colors: Record<PipelineStep["status"], string> = {
     pending: "var(--muted)",
     active: "var(--accent)",
@@ -307,7 +332,7 @@ function PipelineStepRow({ step }: { step: PipelineStep }) {
 
   return (
     <div
-      className="flex items-center gap-2 py-1.5 px-2.5 rounded-md border text-[12px] transition-colors duration-300"
+      className="flex items-center gap-1.5 py-1.5 px-2.5 rounded-full border text-[12px] whitespace-nowrap transition-colors duration-300"
       style={{
         borderColor: borders[step.status],
         backgroundColor: step.status === "active" ? "var(--accent-violet-soft)" : "var(--surface3)",
@@ -322,7 +347,7 @@ function PipelineStepRow({ step }: { step: PipelineStep }) {
         {step.alias ? ` ${step.alias}` : ""}
       </span>
       {step.status === "active" && (
-        <span className="ml-auto text-[10px] font-medium animate-pulse" style={{ color: colors[step.status] }}>
+        <span className="text-[10px] font-medium animate-pulse" style={{ color: colors[step.status] }}>
           running…
         </span>
       )}

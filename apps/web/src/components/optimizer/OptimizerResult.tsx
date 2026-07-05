@@ -1,11 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import type { OptimizationResult } from "@/types";
 import { highlightSQL } from "@/lib/sql/engine";
 
 interface Props {
   result: OptimizationResult;
+}
+
+// Gemini's free-text fields (issue descriptions, explanation) come back as
+// markdown, and often use `backtick` spans to call out identifiers like
+// column or table names. Rendered as plain text those backticks show up
+// literally instead of turning into styled inline code, so split on them
+// and wrap each code span in a <code> element.
+function renderWithInlineCode(text: string) {
+  const parts = text.split(/(`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 1) {
+      return (
+        <code key={i} className="px-1 py-0.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[0.9em] font-mono">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return <Fragment key={i}>{part}</Fragment>;
+  });
 }
 
 export function OptimizerResult({ result }: Props) {
@@ -40,7 +59,7 @@ export function OptimizerResult({ result }: Props) {
               <span className="text-xs font-bold uppercase tracking-wider opacity-70">
                 {issue.severity}
               </span>
-              <p className="mt-1 text-sm leading-relaxed">{issue.description}</p>
+              <p className="mt-1 text-sm leading-relaxed">{renderWithInlineCode(issue.description)}</p>
             </div>
           ))}
         </div>
@@ -101,7 +120,7 @@ export function OptimizerResult({ result }: Props) {
         <h3 className="text-sm font-semibold mb-2 text-[var(--muted)] uppercase tracking-wider">
           Explanation
         </h3>
-        <p className="text-sm leading-relaxed text-[var(--text)]/90">{result.explanation}</p>
+        <p className="text-sm leading-relaxed text-[var(--text)]/90">{renderWithInlineCode(result.explanation)}</p>
       </section>
     </div>
   );

@@ -19,7 +19,13 @@ export function parsePipeline(sql: string): PipelineStep[] {
   const tokens = sql.replace(/[\n\t]/g, " ").split(/\s+/).filter(Boolean);
   const steps: PipelineStep[] = [];
 
-  const fi = tokens.findIndex((w) => w.toUpperCase() === "FROM");
+  // A plain `tokens.findIndex("FROM")` would match the FROM *inside* a
+  // scalar subquery in the SELECT list (e.g. `(SELECT x FROM Y)`) rather
+  // than the query's real top-level FROM, since that subquery's FROM
+  // simply comes first in the token stream. Find the top-level one by
+  // tracking paren depth over the raw SQL and only accepting a FROM seen
+  // at depth 0, then translate that character offset back to a token index.
+  const fi = findTopLevelFromTokenIndex(sql, tokens);
   if (fi === -1) return [];
 
   // ── FROM clause ──
@@ -88,8 +94,98 @@ export function parsePipeline(sql: string): PipelineStep[] {
     pos++;
   }
 
+  // ── Scalar subqueries in the SELECT list ──
+  // A query written with `(SELECT x FROM Y WHERE ...)` per column instead
+  // of a JOIN has no JOIN tokens at all, so without this the pipeline
+  // would jump straight from FROM/WHERE to the final result — technically
+  // correct (sql.js runs the whole statement in one shot either way) but
+  // it looks like the visualizer is skipping work. Surfacing each distinct
+  // table referenced by a subquery as its own step at least shows *where*
+  // the extra per-row lookups are happening, even though — unlike a JOIN —
+  // there's no two-table nested-loop match to animate row-by-row.
+  for (const table of findSubqueryTables(sql)) {
+    steps.push({ type: "SUBQUERY", table, alias: table, status: "pending" });
+  }
+
   steps.push({ type: "SELECT", status: "pending" });
   return steps;
+}
+
+/**
+ * Finds the query's real top-level FROM — the one that isn't nested
+ * inside a `(SELECT ... FROM ...)` subquery — and returns its index in
+ * `tokens`. Falls back to a plain first-match if paren-tracking somehow
+ * finds nothing (e.g. malformed SQL), so parsing degrades gracefully
+ * rather than failing outright on unusual input.
+ */
+function findTopLevelFromTokenIndex(sql: string, tokens: string[]): number {
+  const upper = sql.toUpperCase();
+  let depth = 0;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (
+      depth === 0 &&
+      upper.slice(i, i + 4) === "FROM" &&
+      /\s/.test(sql[i - 1] ?? " ") &&
+      /\s/.test(sql[i + 4] ?? " ")
+    ) {
+      const prefixTokenCount = sql
+        .slice(0, i)
+        .replace(/[\n\t]/g, " ")
+        .split(/\s+/)
+        .filter(Boolean).length;
+      return prefixTokenCount;
+    }
+  }
+  return tokens.findIndex((w) => w.toUpperCase() === "FROM");
+}
+
+/**
+ * Finds every table named in a `FROM` inside the SELECT list (i.e. before
+ * the query's own top-level FROM), which is where scalar/correlated
+ * subqueries live. Tracks paren depth so nested subqueries (a subquery
+ * inside a subquery, e.g. looking up a category through a product lookup)
+ * are still found, and stops once the top-level FROM is reached so the
+ * query's main table(s) aren't double-counted as "subqueries".
+ */
+function findSubqueryTables(sql: string): string[] {
+  const upper = sql.toUpperCase();
+  const selectIdx = upper.indexOf("SELECT");
+  if (selectIdx === -1) return [];
+
+  let depth = 0;
+  let selectListEnd = -1;
+  for (let i = selectIdx + 6; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (
+      depth === 0 &&
+      upper.slice(i, i + 4) === "FROM" &&
+      /\s/.test(sql[i - 1] ?? " ") &&
+      /\s/.test(sql[i + 4] ?? " ")
+    ) {
+      selectListEnd = i;
+      break;
+    }
+  }
+  if (selectListEnd === -1) return [];
+
+  const selectList = sql.slice(selectIdx + 6, selectListEnd);
+  const found: string[] = [];
+  const seen = new Set<string>();
+  const re = /\bFROM\s+([A-Za-z_][A-Za-z0-9_]*)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(selectList))) {
+    const tbl = m[1];
+    if (!seen.has(tbl)) {
+      seen.add(tbl);
+      found.push(tbl);
+    }
+  }
+  return found;
 }
 
 // ── Helpers ──

@@ -2,11 +2,12 @@ import { create } from "zustand";
 import type { TableData, PipelineStep, QueryResult, OptimizationResult, VerifyIndexResult } from "@/types";
 import { SAMPLE_DATASETS } from "@/lib/data/datasets";
 
-// The default table set shown on first load reuses the (larger) E-commerce
-// sample dataset below, so the two never drift out of sync and the app
-// always starts with a reasonably-sized, representative schema instead of
-// a tiny hand-maintained duplicate.
-const DEFAULT_DATA: TableData = SAMPLE_DATASETS.ecommerce.data;
+// The default table set shown on first load reuses the (larger) Sales
+// Pipeline sample dataset below, so the two never drift out of sync and the
+// app always starts with a reasonably-sized, representative 6-table schema
+// (Orders/Customers/Products/Categories/Employees/Addresses) instead of a
+// tiny hand-maintained duplicate.
+const DEFAULT_DATA: TableData = SAMPLE_DATASETS.salesPipeline.data;
 
 interface AppState {
   tableData: TableData;
@@ -38,10 +39,33 @@ interface AppState {
   setAiSQL: (sql: string) => void;
   aiResult: OptimizationResult | null;
   setAiResult: (r: OptimizationResult | null) => void;
+  // The exact SQL text that was actually submitted to the AI when aiResult
+  // was produced. Needed because aiResult lives in global state and the
+  // Performance tab benchmarks independently-edited queries — without
+  // this, other consumers of aiResult could silently reuse index
+  // suggestions that were generated for an unrelated query.
+  aiAnalyzedSQL: string | null;
+  setAiAnalyzedSQL: (sql: string | null) => void;
   aiLoading: boolean;
   setAiLoading: (v: boolean) => void;
   aiError: string | null;
   setAiError: (msg: string | null) => void;
+
+  // The Performance tab now has TWO independent query editors so a person
+  // can benchmark genuinely different SQL side by side — separate from
+  // visualizerSQL (Visualize tab) and aiSQL (AI Optimizer tab). All three
+  // tabs still read from the same shared tableData.
+  //
+  // Editor A — the raw, unoptimized query the user writes themselves.
+  perfOriginalSQL: string;
+  setPerfOriginalSQL: (sql: string) => void;
+  // Editor B — the (possibly AI-rewritten) optimized query. Defaults to ""
+  // rather than being auto-filled from aiResult.optimized_sql: silently
+  // overwriting it whenever the AI Optimizer tab is re-run would clobber
+  // manual edits (same class of bug as the aiAnalyzedSQL guard above) — so
+  // pulling in the AI's suggestion is always an explicit, on-demand action.
+  perfOptimizedSQL: string;
+  setPerfOptimizedSQL: (sql: string) => void;
 
   dataVolume: number;
   setDataVolume: (v: number) => void;
@@ -149,16 +173,7 @@ export const useStore = create<AppState>((set) => ({
       return { tableData: { ...s.tableData, [table]: rows } };
     }),
 
-  visualizerSQL: `SELECT
-  o.id AS order_id,
-  c.name AS customer,
-  p.name AS product,
-  o.quantity,
-  p.price
-FROM Orders o
-JOIN Customers c ON o.customer_id = c.id
-JOIN Products p ON o.product_id = p.id
-WHERE o.quantity > 0`,
+  visualizerSQL: SAMPLE_DATASETS.salesPipeline.query,
   setVisualizerSQL: (sql) => set({ visualizerSQL: sql }),
 
   pipeline: [],
@@ -191,11 +206,20 @@ AND o.quantity > 1`,
   aiResult: null,
   setAiResult: (r) => set({ aiResult: r }),
 
+  aiAnalyzedSQL: null,
+  setAiAnalyzedSQL: (sql) => set({ aiAnalyzedSQL: sql }),
+
   aiLoading: false,
   setAiLoading: (v) => set({ aiLoading: v }),
 
   aiError: null,
   setAiError: (msg) => set({ aiError: msg }),
+
+  perfOriginalSQL: SAMPLE_DATASETS.salesPipeline.query,
+  setPerfOriginalSQL: (sql) => set({ perfOriginalSQL: sql }),
+
+  perfOptimizedSQL: "",
+  setPerfOptimizedSQL: (sql) => set({ perfOptimizedSQL: sql }),
 
   dataVolume: 10_000,
   setDataVolume: (v) => set({ dataVolume: v }),
@@ -212,9 +236,13 @@ AND o.quantity > 1`,
     set({
       tableData: JSON.parse(JSON.stringify(SAMPLE_DATASETS[key].data)),
       activeDataset: key,
+      visualizerSQL: SAMPLE_DATASETS[key].query,
+      perfOriginalSQL: SAMPLE_DATASETS[key].query,
+      perfOptimizedSQL: "",
       queryResult: null,
       pipeline: [],
       aiResult: null,
+      aiAnalyzedSQL: null,
       verifyResult: null,
     }),
 
@@ -230,6 +258,7 @@ AND o.quantity > 1`,
     set((s) => ({
       aiSQL: `SELECT *\nFROM Orders o, Customers c\nWHERE o.customer_id = c.id\nAND o.quantity > 1`,
       aiResult: null,
+      aiAnalyzedSQL: null,
       aiError: null,
       verifyResult: null,
       demoTrigger: s.demoTrigger + 1,

@@ -10,7 +10,7 @@ export interface TableData {
 }
 
 // ── SQL Execution Pipeline ─────────────────────────────────────
-export type PipelineStepType = "FROM" | "JOIN" | "WHERE" | "SELECT";
+export type PipelineStepType = "FROM" | "JOIN" | "WHERE" | "SUBQUERY" | "SELECT";
 export type PipelineStepStatus = "pending" | "active" | "done";
 
 export interface PipelineStep {
@@ -60,8 +60,19 @@ export interface SuggestIndexesRequestBody {
 // ── Performance Chart ──────────────────────────────────────────
 export interface PerfDataPoint {
   rows: number;
-  seqMs: number;
-  idxMs: number;
+  /** Wall-clock time for the Original Query (Editor A) at this volume. */
+  originalMs: number;
+  /** Wall-clock time for the Optimized Query (Editor B), with the AI's
+   *  suggested indexes applied, at this volume. */
+  optimizedMs: number;
+  /** -1 / true when the ORIGINAL side wasn't actually run at this volume —
+   *  either it failed validation (bad SQL) or a smaller volume on this
+   *  side already exceeded the time budget. Tracked independently from
+   *  the optimized side since the two queries can fail or blow up at
+   *  different points. */
+  originalSkipped?: boolean;
+  /** Same as `originalSkipped`, for the OPTIMIZED side. */
+  optimizedSkipped?: boolean;
 }
 
 // ── Index verification (real sql.js EXPLAIN QUERY PLAN before/after) ──

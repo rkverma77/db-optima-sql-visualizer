@@ -7,9 +7,12 @@ import {
   BarChart, Bar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
 } from "recharts";
 import type { PerfDataPoint } from "@/types";
-import { benchmarkAcrossVolumes, explainQueryPlan, verifyIndexImpact, yieldToBrowser } from "@/lib/sql/runner";
+import {
+  benchmarkAcrossVolumes, explainQueryPlan, explainQueryPlanWithIndexes, compareQueries, yieldToBrowser,
+} from "@/lib/sql/runner";
 import { generateSyntheticData } from "@/lib/data/datasets";
 import { parsePipeline, deriveIndexSuggestions, highlightSQL } from "@/lib/sql/engine";
+import { SQLEditor } from "@/components/ui/SQLEditor";
 
 function formatRows(n: number) {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
@@ -68,17 +71,18 @@ function estimateMemory(rows: number, tableData: Record<string, any[]>): string 
 }
 
 // ── Export to CSV ───────────────────────────────────────────
-function exportToCSV(benchmarks: PerfDataPoint[], query: string) {
-  const headers = ["Rows", "No Index (ms)", "With Index (ms)", "Speedup"];
+function exportToCSV(benchmarks: PerfDataPoint[], originalSQL: string, optimizedSQL: string) {
+  const headers = ["Rows", "Original Query (ms)", "Optimized Query (ms)", "Speedup"];
   const rows = benchmarks.map(b => [
     b.rows,
-    b.seqMs.toFixed(3),
-    b.idxMs.toFixed(3),
-    b.idxMs > 0 ? (b.seqMs / b.idxMs).toFixed(3) : "N/A"
+    b.originalMs >= 0 ? b.originalMs.toFixed(3) : "skipped",
+    b.optimizedMs >= 0 ? b.optimizedMs.toFixed(3) : "skipped",
+    b.originalMs >= 0 && b.optimizedMs > 0 ? (b.originalMs / b.optimizedMs).toFixed(3) : "N/A"
   ]);
   
   const csv = [
-    `# Query: ${query.replace(/\n/g, " ")}`,
+    `# Original Query: ${originalSQL.replace(/\n/g, " ")}`,
+    `# Optimized Query: ${optimizedSQL.replace(/\n/g, " ")}`,
     `# Generated: ${new Date().toISOString()}`,
     headers.join(","),
     ...rows.map(r => r.join(","))
@@ -93,9 +97,10 @@ function exportToCSV(benchmarks: PerfDataPoint[], query: string) {
   URL.revokeObjectURL(url);
 }
 
-function exportToJSON(benchmarks: PerfDataPoint[], query: string, tableData: Record<string, any[]>) {
+function exportToJSON(benchmarks: PerfDataPoint[], originalSQL: string, optimizedSQL: string, tableData: Record<string, any[]>) {
   const data = {
-    query,
+    originalQuery: originalSQL,
+    optimizedQuery: optimizedSQL,
     generatedAt: new Date().toISOString(),
     tableStats: Object.fromEntries(
       Object.entries(tableData).map(([k, v]) => [k, { rows: v.length, columns: v[0] ? Object.keys(v[0]) : [] }])
@@ -113,33 +118,83 @@ function exportToJSON(benchmarks: PerfDataPoint[], query: string, tableData: Rec
 }
 
 export function PerformanceTab() {
-  const { dataVolume, setDataVolume, tableData, visualizerSQL, aiResult } = useStore();
+  const {
+    dataVolume, setDataVolume, tableData,
+    perfOriginalSQL, setPerfOriginalSQL,
+    perfOptimizedSQL, setPerfOptimizedSQL,
+    aiResult,
+  } = useStore();
 
   const [allBenchmarks, setAllBenchmarks] = useState<PerfDataPoint[]>([]);
   const [isComputing, setIsComputing] = useState(false);
   const [hasComputed, setHasComputed] = useState(false);
   const [computeTime, setComputeTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
-  
+
   const [planBefore, setPlanBefore] = useState<string>("");
   const [planAfter, setPlanAfter] = useState<string>("");
   const [planBeforeRaw, setPlanBeforeRaw] = useState<any[]>([]);
   const [planAfterRaw, setPlanAfterRaw] = useState<any[]>([]);
   const [runError, setRunError] = useState<string | null>(null);
-  const [verifyResult, setVerifyResult] = useState<any>(null);
-  
+  // Per-editor errors — a broken query on one side (e.g. references a
+  // dropped table) never blocks the other side's run or its results.
+  const [originalError, setOriginalError] = useState<string | null>(null);
+  const [optimizedError, setOptimizedError] = useState<string | null>(null);
+  const [compareResult, setCompareResult] = useState<any>(null);
+
   const [history, setHistory] = useState<{ id: number; time: string; query: string; speedup: string }[]>([]);
-  
+
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
+  const cancelRef = useRef(false);
+  const [wasCancelled, setWasCancelled] = useState(false);
+
+  // "Optimized" bundles a rewritten query with new indexes, so the AI's
+  // suggested indexes are applied to the optimized side whenever they
+  // exist — Editor B is explicitly "the optimized side", so there's no
+  // cross-tab ambiguity here (unlike the old single-query flow, there's no
+  // risk of borrowing suggestions meant for an unrelated query).
+  const usingAiSuggestedIndexes = !!(aiResult?.index_statements?.length);
 
   const indexDdl = useMemo(() => {
-    if (aiResult?.index_statements?.length) return aiResult.index_statements;
-    const steps = parsePipeline(visualizerSQL);
+    if (usingAiSuggestedIndexes && aiResult?.index_statements?.length) {
+      return aiResult.index_statements;
+    }
+    if (!perfOptimizedSQL.trim()) return [];
+    const steps = parsePipeline(perfOptimizedSQL);
     return deriveIndexSuggestions(steps);
-  }, [aiResult, visualizerSQL]);
+  }, [usingAiSuggestedIndexes, aiResult, perfOptimizedSQL]);
 
-  const complexity = useMemo(() => analyzeComplexity(visualizerSQL), [visualizerSQL]);
+  // Complexity / radar / tips are about the raw query someone's trying to
+  // improve, so they stay anchored to Editor A (the original).
+  const complexity = useMemo(() => analyzeComplexity(perfOriginalSQL), [perfOriginalSQL]);
+
+  const canUseAiSuggestion = !!(
+    aiResult?.optimized_sql &&
+    aiResult.optimized_sql.trim() &&
+    aiResult.optimized_sql.trim() !== perfOptimizedSQL.trim()
+  );
+
+  const canRun = perfOptimizedSQL.trim().length > 0;
+  const queriesIdentical = canRun && perfOriginalSQL.trim() === perfOptimizedSQL.trim();
+
+  // This check only tells you something useful when Editor A and Editor B
+  // hold the *same* SQL (the "sanity check" case from the acceptance
+  // criteria) — there, the only variable is the index, so if none of the
+  // suggested index names show up in the "after" plan, SQLite decided not
+  // to use them (usually because the baseline `id` index every table has
+  // already covers the access pattern just as well). When the two queries
+  // actually differ, the plans are *expected* to differ from the rewrite
+  // itself, so this specific "index unused" signal isn't meaningful on its
+  // own — the measured speedup already tells that story.
+  const suggestedIndexActuallyUsed = useMemo(() => {
+    if (!compareResult || !indexDdl.length) return true;
+    const names = indexDdl
+      .map((ddl) => ddl.match(/INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?(\w+)["`]?/i)?.[1])
+      .filter((n): n is string => !!n);
+    if (!names.length) return true;
+    return names.some((n) => (compareResult.after?.summary ?? "").toLowerCase().includes(n.toLowerCase()));
+  }, [compareResult, indexDdl]);
 
   const startTimer = () => {
     startTimeRef.current = Date.now();
@@ -160,51 +215,81 @@ export function PerformanceTab() {
   };
 
   const computeBenchmarks = useCallback(async () => {
-    if (isComputing) return;
+    if (isComputing || !canRun) return;
     setIsComputing(true);
     setRunError(null);
+    setOriginalError(null);
+    setOptimizedError(null);
     setHasComputed(false);
     setComputeTime(null);
+    setWasCancelled(false);
+    setCompareResult(null);
+    setPlanBefore("");
+    setPlanAfter("");
+    setPlanBeforeRaw([]);
+    setPlanAfterRaw([]);
+    cancelRef.current = false;
     startTimer();
 
     try {
-      const points = await benchmarkAcrossVolumes(
+      const result = await benchmarkAcrossVolumes(
         (rows) => generateSyntheticData(tableData, rows),
-        visualizerSQL,
+        perfOriginalSQL,
+        perfOptimizedSQL,
         indexDdl,
-        ALL_VOLUMES
+        ALL_VOLUMES,
+        { maxMsPerRun: 4000, shouldCancel: () => cancelRef.current }
       );
-      
-      const totalTime = stopTimer();
-      setAllBenchmarks(points);
+
+      if (cancelRef.current) setWasCancelled(true);
+
+      stopTimer();
+      setAllBenchmarks(result.points);
+      setOriginalError(result.originalError);
+      setOptimizedError(result.optimizedError);
       setHasComputed(true);
 
-      // Save to history
-      const lastPoint = points[points.length - 1];
-      const speedup = lastPoint && lastPoint.idxMs > 0 ? (lastPoint.seqMs / lastPoint.idxMs).toFixed(1) : "—";
+      // Save to history (based on the last volume where both sides ran)
+      const lastComplete = [...result.points].reverse().find((p) => p.originalMs >= 0 && p.optimizedMs > 0);
+      const speedupVal = lastComplete ? (lastComplete.originalMs / lastComplete.optimizedMs).toFixed(1) : "—";
       setHistory(prev => [...prev.slice(-4), {
         id: Date.now(),
         time: new Date().toLocaleTimeString(),
-        query: visualizerSQL.slice(0, 50) + "...",
-        speedup
+        query: perfOriginalSQL.slice(0, 50) + "...",
+        speedup: speedupVal
       }]);
 
-      // Get EXPLAIN and verify
-      await yieldToBrowser();
-      const scaled = generateSyntheticData(tableData, dataVolume);
-      const before = await explainQueryPlan(visualizerSQL, scaled);
-      setPlanBefore(before.summary);
-      setPlanBeforeRaw(before.raw);
-
-      // Run verifyIndexImpact for detailed comparison
-      if (indexDdl.length > 0) {
+      // Get EXPLAIN plans and a single-volume timing comparison — skip if
+      // cancelled, since these also execute the (possibly slow) queries
+      // against a scaled dataset and there's no point starting more work
+      // after a cancel.
+      if (!cancelRef.current) {
         await yieldToBrowser();
-        const verify = await verifyIndexImpact(visualizerSQL, scaled, indexDdl);
-        setVerifyResult(verify);
-        setPlanAfterRaw(verify.after.raw);
-        setPlanAfter(verify.after.summary);
-      } else {
-        setPlanAfter("(no index suggestions yet — run AI Optimizer)");
+        const scaled = generateSyntheticData(tableData, dataVolume);
+
+        if (!result.originalError && !result.optimizedError) {
+          const compare = await compareQueries(perfOriginalSQL, perfOptimizedSQL, scaled, indexDdl);
+          setCompareResult(compare);
+          setPlanBefore(compare.before.summary);
+          setPlanBeforeRaw(compare.before.raw);
+          setPlanAfter(compare.after.summary);
+          setPlanAfterRaw(compare.after.raw);
+        } else {
+          // At least one side is broken — still show a real plan for
+          // whichever side works, without blocking on the other.
+          if (!result.originalError) {
+            await yieldToBrowser();
+            const before = await explainQueryPlan(perfOriginalSQL, scaled);
+            setPlanBefore(before.summary);
+            setPlanBeforeRaw(before.raw);
+          }
+          if (!result.optimizedError) {
+            await yieldToBrowser();
+            const after = await explainQueryPlanWithIndexes(perfOptimizedSQL, scaled, indexDdl);
+            setPlanAfter(after.summary);
+            setPlanAfterRaw(after.raw);
+          }
+        }
       }
     } catch (e) {
       stopTimer();
@@ -212,36 +297,44 @@ export function PerformanceTab() {
     } finally {
       setIsComputing(false);
     }
-  }, [tableData, visualizerSQL, indexDdl, dataVolume, isComputing]);
+  }, [tableData, perfOriginalSQL, perfOptimizedSQL, indexDdl, dataVolume, isComputing, canRun]);
 
   useEffect(() => {
     setHasComputed(false);
     setAllBenchmarks([]);
     setComputeTime(null);
-  }, [visualizerSQL, tableData, indexDdl]);
+  }, [perfOriginalSQL, perfOptimizedSQL, tableData, indexDdl]);
 
   const chartData = useMemo(() => {
-    return allBenchmarks.filter((p) => p.rows <= dataVolume);
+    return allBenchmarks
+      .filter((p) => p.rows <= dataVolume)
+      .map((p) => ({
+        ...p,
+        originalMs: p.originalMs >= 0 ? p.originalMs : null,
+        optimizedMs: p.optimizedMs >= 0 ? p.optimizedMs : null,
+      }));
   }, [allBenchmarks, dataVolume]);
 
   const yAxisMax = useMemo(() => {
     if (chartData.length === 0) return 100;
-    const maxVal = Math.max(...chartData.map((d) => Math.max(d.seqMs, d.idxMs)));
+    const maxVal = Math.max(...chartData.map((d) => Math.max(d.originalMs ?? 0, d.optimizedMs ?? 0)));
     return Math.ceil(maxVal * 1.2 / 10) * 10 || 100;
   }, [chartData]);
 
   const last = chartData[chartData.length - 1];
-  const speedup = last && last.idxMs > 0 ? (last.seqMs / last.idxMs).toFixed(1) : "—";
+  const speedup = last && last.originalMs != null && last.optimizedMs != null && last.optimizedMs > 0
+    ? (last.originalMs / last.optimizedMs).toFixed(1)
+    : "—";
 
-  // Radar chart data for complexity
+  // Radar chart data for complexity (anchored to the original query)
   const radarData = useMemo(() => [
-    { subject: "JOINs", A: Math.min((visualizerSQL.match(/JOIN/gi) || []).length * 20, 100), fullMark: 100 },
-    { subject: "Conditions", A: visualizerSQL.includes("WHERE") ? 60 : 0, fullMark: 100 },
-    { subject: "Aggregation", A: visualizerSQL.includes("GROUP BY") ? 80 : 0, fullMark: 100 },
-    { subject: "Sorting", A: visualizerSQL.includes("ORDER BY") ? 50 : 0, fullMark: 100 },
-    { subject: "Subqueries", A: (visualizerSQL.match(/SELECT/gi) || []).length > 1 ? 90 : 0, fullMark: 100 },
-    { subject: "Length", A: Math.min(visualizerSQL.length / 3, 100), fullMark: 100 },
-  ], [visualizerSQL]);
+    { subject: "JOINs", A: Math.min((perfOriginalSQL.match(/JOIN/gi) || []).length * 20, 100), fullMark: 100 },
+    { subject: "Conditions", A: perfOriginalSQL.includes("WHERE") ? 60 : 0, fullMark: 100 },
+    { subject: "Aggregation", A: perfOriginalSQL.includes("GROUP BY") ? 80 : 0, fullMark: 100 },
+    { subject: "Sorting", A: perfOriginalSQL.includes("ORDER BY") ? 50 : 0, fullMark: 100 },
+    { subject: "Subqueries", A: (perfOriginalSQL.match(/SELECT/gi) || []).length > 1 ? 90 : 0, fullMark: 100 },
+    { subject: "Length", A: Math.min(perfOriginalSQL.length / 3, 100), fullMark: 100 },
+  ], [perfOriginalSQL]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -251,6 +344,110 @@ export function PerformanceTab() {
 
   return (
     <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5 min-h-0 pb-20">
+      {/* ── Dual-Query Benchmark Comparison ── This tab has its own two
+          editors: both are independent of Visualize/AI Optimizer's
+          editors, though all tabs read from the same shared tables (left
+          sidebar). Editor B pulls from the AI Optimizer's output only on
+          explicit request ("Use AI suggestion"), never automatically. */}
+      <div className="card card-accent-amber p-4 shrink-0">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="panel-heading">
+            <span className="panel-dot" style={{ background: "var(--accent-amber)" }} />
+            Original vs. Optimized Query
+          </h3>
+          <button onClick={computeBenchmarks} disabled={isComputing || !canRun} className="btn-primary" title={!canRun ? "Add an optimized query to compare against." : undefined}>
+            {isComputing ? (
+              <>
+                <svg className="animate-spin-slow w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Computing… {formatTime(elapsedTime)}
+              </>
+            ) : hasComputed ? (
+              <>↻ Re-run</>
+            ) : (
+              <>▶ Run Comparison Benchmark</>
+            )}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wide mb-1.5 text-[var(--muted)]">Original Query (unoptimized)</div>
+            <SQLEditor
+              value={perfOriginalSQL}
+              onChange={setPerfOriginalSQL}
+              placeholder="Paste a SQL query to benchmark…"
+              minHeight={170}
+            />
+            <div className="flex items-center gap-3 mt-2 text-[11px] text-[var(--muted)]">
+              <span>{perfOriginalSQL.trim().split(/\s+/).filter(Boolean).length} tokens</span>
+              <span>•</span>
+              <span>{Object.keys(tableData).length} tables loaded</span>
+            </div>
+            {originalError && (
+              <div className="mt-2 p-2 rounded-lg text-[11px]" style={{ color: "var(--error)", background: "color-mix(in srgb, var(--error) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--error) 35%, transparent)" }}>
+                ⚠ {originalError}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">Optimized Query</div>
+              {canUseAiSuggestion && (
+                <button
+                  onClick={() => setPerfOptimizedSQL(aiResult!.optimized_sql)}
+                  className="text-[10px] px-2 py-0.5 rounded-full border"
+                  style={{ color: "var(--success)", borderColor: "color-mix(in srgb, var(--success) 40%, transparent)", background: "color-mix(in srgb, var(--success) 8%, transparent)" }}
+                >
+                  ↓ Use AI Optimizer&apos;s suggestion
+                </button>
+              )}
+            </div>
+            <SQLEditor
+              value={perfOptimizedSQL}
+              onChange={setPerfOptimizedSQL}
+              placeholder="Paste your own optimized query, or run AI Optimizer and click 'Use AI suggestion' to fill this in."
+              minHeight={170}
+            />
+            <div className="flex items-center gap-3 mt-2 text-[11px] text-[var(--muted)]">
+              <span>{perfOptimizedSQL.trim().split(/\s+/).filter(Boolean).length} tokens</span>
+              <span>•</span>
+              <span>{Object.keys(tableData).length} tables loaded</span>
+            </div>
+            {optimizedError && (
+              <div className="mt-2 p-2 rounded-lg text-[11px]" style={{ color: "var(--error)", background: "color-mix(in srgb, var(--error) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--error) 35%, transparent)" }}>
+                ⚠ {optimizedError}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {!canRun && (
+          <div className="mt-3 text-[11px] px-3 py-1.5 rounded-lg" style={{ color: "var(--warning)", background: "color-mix(in srgb, var(--warning) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--warning) 35%, transparent)" }}>
+            Add an optimized query to compare against.
+          </div>
+        )}
+        {queriesIdentical && (
+          <div className="mt-3 text-[11px] px-3 py-1.5 rounded-lg" style={{ color: "var(--muted)", background: "var(--surface3)", border: "1px solid var(--border)" }}>
+            Both queries are identical — no difference expected.
+          </div>
+        )}
+
+        <div className="flex items-center gap-4 mt-3 text-xs text-[var(--muted)]">
+          {isComputing && (
+            <button
+              onClick={() => { cancelRef.current = true; }}
+              className="btn-secondary text-xs px-3 py-1 ml-auto"
+            >
+              ✕ Cancel
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* ── Compute Button / Status ── */}
       {!hasComputed && (
         <div className="card card-accent-amber p-6 flex flex-col items-center justify-center text-center gap-4 min-h-[300px]">
@@ -263,7 +460,7 @@ export function PerformanceTab() {
           <div>
             <h3 className="text-lg font-semibold mb-1">Performance Benchmark</h3>
             <p className="text-sm text-[var(--muted)] max-w-md">
-              Run SQLite benchmarks across {ALL_VOLUMES.length} volume points (1K → 100K rows) to generate performance curves.
+              Run both queries across {ALL_VOLUMES.length} volume points (1K → 100K rows) against identical synthetic data to generate comparison curves.
             </p>
           </div>
 
@@ -272,22 +469,58 @@ export function PerformanceTab() {
             style={{ color: "var(--success)", borderColor: "color-mix(in srgb, var(--success) 35%, transparent)", background: "color-mix(in srgb, var(--success) 8%, transparent)" }}
           >
             <span>●</span>
-            <span>Every number below comes from a real SQLite (WASM) engine actually running your query — not a simulation or an estimate.</span>
+            <span>Every number below comes from a real SQLite (WASM) engine actually running your queries — not a simulation or an estimate.</span>
           </div>
 
-          <button onClick={computeBenchmarks} disabled={isComputing} className="btn-primary px-6 py-2.5 text-sm">
-            {isComputing ? (
-              <>
-                <svg className="animate-spin-slow w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Computing… {formatTime(elapsedTime)}
-              </>
-            ) : (
-              <>▶ Compute Benchmarks</>
+          <div
+            className="flex items-center gap-2 text-[11px] px-3 py-1.5 rounded-full border"
+            style={{ color: "var(--muted)", borderColor: "var(--border)", background: "var(--surface3)" }}
+          >
+            <span>⏱</span>
+            <span>If a run takes longer than 4s, larger volumes are skipped automatically for that query — and you can cancel at any time.</span>
+          </div>
+
+          {complexity.factors.includes("Subquery") && !isComputing && (
+            <div className="text-[11px] px-3 py-1.5 rounded-lg" style={{ color: "var(--warning)", background: "color-mix(in srgb, var(--warning) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--warning) 35%, transparent)" }}>
+              ⚠ The original query uses subqueries in the SELECT list. SQLite re-runs a correlated subquery once per outer row, so cost grows much faster than a JOIN as row counts increase — this benchmark may hit the time budget above and stop early at a smaller volume.
+            </div>
+          )}
+
+          {!isComputing && (
+            <div
+              className="flex items-center gap-2 text-[12px] px-3 py-1.5 rounded-full border font-medium"
+              style={{ color: "var(--error)", borderColor: "color-mix(in srgb, var(--error) 45%, transparent)", background: "var(--error-soft)" }}
+            >
+              <span>⚠</span>
+              <span>
+                Results are shown in under a minute — the page may briefly freeze or show &quot;Not Responding&quot; while it calculates. Please stay tuned.
+              </span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button onClick={computeBenchmarks} disabled={isComputing || !canRun} className="btn-primary px-6 py-2.5 text-sm">
+              {isComputing ? (
+                <>
+                  <svg className="animate-spin-slow w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Computing… {formatTime(elapsedTime)}
+                </>
+              ) : (
+                <>▶ Run Comparison Benchmark</>
+              )}
+            </button>
+            {isComputing && (
+              <button
+                onClick={() => { cancelRef.current = true; }}
+                className="btn-secondary px-4 py-2.5 text-sm"
+              >
+                ✕ Cancel
+              </button>
             )}
-          </button>
+          </div>
 
           {isComputing && (
             <div className="w-64 h-1.5 bg-[var(--surface3)] rounded-full overflow-hidden">
@@ -313,35 +546,64 @@ export function PerformanceTab() {
               <span>Benchmarks computed in <strong>{computeTime?.toFixed(1)}s</strong> — real SQLite execution, not simulated</span>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => exportToCSV(allBenchmarks, visualizerSQL)} className="btn-secondary text-xs px-3 py-1.5">
+              <button onClick={() => exportToCSV(allBenchmarks, perfOriginalSQL, perfOptimizedSQL)} className="btn-secondary text-xs px-3 py-1.5">
                 📥 CSV
               </button>
-              <button onClick={() => exportToJSON(allBenchmarks, visualizerSQL, tableData)} className="btn-secondary text-xs px-3 py-1.5">
+              <button onClick={() => exportToJSON(allBenchmarks, perfOriginalSQL, perfOptimizedSQL, tableData)} className="btn-secondary text-xs px-3 py-1.5">
                 📥 JSON
               </button>
-              <button onClick={computeBenchmarks} disabled={isComputing} className="btn-secondary text-xs px-3 py-1.5">
-                ↻ Re-compute
+              <button onClick={computeBenchmarks} disabled={isComputing || !canRun} className="btn-secondary text-xs px-3 py-1.5">
+                {isComputing ? `Computing… ${formatTime(elapsedTime)}` : "↻ Re-run"}
               </button>
+              {isComputing && (
+                <button onClick={() => { cancelRef.current = true; }} className="btn-secondary text-xs px-3 py-1.5">
+                  ✕ Cancel
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Query Details */}
-          <div className="card overflow-hidden">
-            <div className="px-4 py-2.5 bg-[var(--surface)] border-b border-[var(--border)] flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">Query Being Benchmarked</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: complexity.color + "20", color: complexity.color, border: `1px solid ${complexity.color}40` }}>
-                {complexity.label} • Score: {complexity.score}/15
-              </span>
+          {(wasCancelled || allBenchmarks.some((p) => p.originalSkipped || p.optimizedSkipped)) && (
+            <div className="text-[11px] px-3 py-2 rounded-lg flex-shrink-0" style={{ color: "var(--warning)", background: "color-mix(in srgb, var(--warning) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--warning) 35%, transparent)" }}>
+              {wasCancelled
+                ? "⚠ Benchmark cancelled — showing whatever volumes finished before you stopped it."
+                : "⚠ Some larger volumes were skipped for one or both queries because a smaller one already exceeded the 4s time budget — common with correlated subqueries."}
             </div>
-            <div className="p-4">
-              <pre className="code-block text-xs" dangerouslySetInnerHTML={{ __html: highlightSQL(visualizerSQL) }} />
-              {complexity.factors.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {complexity.factors.map((f, i) => (
-                    <span key={i} className="badge badge-info text-[10px]">{f}</span>
-                  ))}
-                </div>
-              )}
+          )}
+
+          {/* Query Details */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="card overflow-hidden">
+              <div className="px-4 py-2.5 bg-[var(--surface)] border-b border-[var(--border)] flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">Original Query</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: complexity.color + "20", color: complexity.color, border: `1px solid ${complexity.color}40` }}>
+                  {complexity.label} • Score: {complexity.score}/15
+                </span>
+              </div>
+              <div className="p-4">
+                <pre className="code-block text-xs" dangerouslySetInnerHTML={{ __html: highlightSQL(perfOriginalSQL) }} />
+                {complexity.factors.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {complexity.factors.map((f, i) => (
+                      <span key={i} className="badge badge-info text-[10px]">{f}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="card overflow-hidden">
+              <div className="px-4 py-2.5 bg-[var(--surface)] border-b border-[var(--border)] flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">Optimized Query</span>
+                {indexDdl.length > 0 && (
+                  <span className="text-[10px]" style={{ color: usingAiSuggestedIndexes ? "var(--success)" : "var(--muted)" }}>
+                    {usingAiSuggestedIndexes ? "✓ AI-suggested indexes applied" : "Auto-derived indexes applied"}
+                  </span>
+                )}
+              </div>
+              <div className="p-4">
+                <pre className="code-block text-xs" dangerouslySetInnerHTML={{ __html: highlightSQL(perfOptimizedSQL) }} />
+              </div>
             </div>
           </div>
 
@@ -349,7 +611,7 @@ export function PerformanceTab() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="card overflow-hidden">
               <div className="px-4 py-2.5 bg-[var(--surface)] border-b border-[var(--border)]">
-                <span className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">Query Complexity Profile</span>
+                <span className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">Query Complexity Profile (Original)</span>
               </div>
               <div className="p-4" style={{ height: 250 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -429,8 +691,8 @@ export function PerformanceTab() {
                   <YAxis tickFormatter={(v: number) => `${v.toFixed(0)}ms`} tick={{ fill: "var(--muted)", fontSize: 10 }} stroke="var(--border)" domain={[0, yAxisMax]} allowDataOverflow label={{ value: "Exec Time (ms)", angle: -90, position: "insideLeft", fill: "var(--muted)", fontSize: 10, dy: 50 }} />
                   <Tooltip contentStyle={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 6 }} labelStyle={{ color: "var(--muted)", fontSize: 11 }} itemStyle={{ fontSize: 11 }} labelFormatter={(v: number) => `${formatRows(v)} rows`} formatter={(v: number) => [`${v.toFixed(2)} ms`]} />
                   <Legend wrapperStyle={{ fontSize: 11, color: "var(--muted)" }} />
-                  <Line type="monotone" dataKey="seqMs" name="Without suggested indexes" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                  <Line type="monotone" dataKey="idxMs" name="With suggested indexes" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="originalMs" name="Original" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="optimizedMs" name="Optimized" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -438,8 +700,8 @@ export function PerformanceTab() {
 
           {/* Metrics */}
           <div className="grid grid-cols-4 gap-4 flex-shrink-0">
-            <MetricCard label="No-Index Time" value={last ? `${last.seqMs.toFixed(1)} ms` : "—"} color="var(--error)" sub={`at ${formatRows(dataVolume)} rows`} />
-            <MetricCard label="Indexed Time" value={last ? `${last.idxMs.toFixed(1)} ms` : "—"} color="var(--success)" sub={`at ${formatRows(dataVolume)} rows`} />
+            <MetricCard label="Original Time" value={last && last.originalMs != null ? `${last.originalMs.toFixed(1)} ms` : "—"} color="var(--error)" sub={`at ${formatRows(dataVolume)} rows`} />
+            <MetricCard label="Optimized Time" value={last && last.optimizedMs != null ? `${last.optimizedMs.toFixed(1)} ms` : "—"} color="var(--success)" sub={`at ${formatRows(dataVolume)} rows`} />
             <MetricCard label="Speedup Factor" value={`${speedup}×`} color="var(--accent)" sub="measured, not simulated" />
             <MetricCard label="Est. Memory" value={estimateMemory(dataVolume, tableData)} color="var(--warning)" sub="for synthetic dataset" />
           </div>
@@ -454,22 +716,42 @@ export function PerformanceTab() {
                 <thead>
                   <tr className="border-b border-[var(--border)] bg-[var(--surface)]">
                     <th className="text-left p-3 text-[var(--muted)]">Rows</th>
-                    <th className="text-right p-3 text-[var(--error)]">No Index (ms)</th>
-                    <th className="text-right p-3 text-[var(--success)]">With Index (ms)</th>
+                    <th className="text-right p-3 text-[var(--error)]">Original Query (ms)</th>
+                    <th className="text-right p-3 text-[var(--success)]">Optimized Query (ms)</th>
                     <th className="text-right p-3 text-[var(--accent)]">Speedup</th>
                     <th className="text-right p-3 text-[var(--muted)]">Rows/Sec</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {allBenchmarks.map((point, i) => (
-                    <tr key={i} className={`border-b border-[var(--border)]/30 ${point.rows === dataVolume ? 'bg-[var(--accent)]/5' : ''}`}>
-                      <td className="p-3 font-mono">{formatRows(point.rows)}</td>
-                      <td className="p-3 text-right font-mono text-[var(--error)]">{point.seqMs.toFixed(2)}</td>
-                      <td className="p-3 text-right font-mono text-[var(--success)]">{point.idxMs.toFixed(2)}</td>
-                      <td className="p-3 text-right font-mono text-[var(--accent)]">{point.idxMs > 0 ? (point.seqMs / point.idxMs).toFixed(2) + "×" : "—"}</td>
-                      <td className="p-3 text-right font-mono text-[var(--muted)]">{((point.rows / point.seqMs) * 1000).toFixed(0)}</td>
-                    </tr>
-                  ))}
+                  {allBenchmarks.map((point, i) => {
+                    if (point.originalSkipped && point.optimizedSkipped) {
+                      return (
+                        <tr key={i} className="border-b border-[var(--border)]/30 opacity-50">
+                          <td className="p-3 font-mono">{formatRows(point.rows)}</td>
+                          <td colSpan={4} className="p-3 text-[var(--muted)] italic">
+                            Skipped — a smaller volume already exceeded the time budget (or the query errored)
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return (
+                      <tr key={i} className={`border-b border-[var(--border)]/30 ${point.rows === dataVolume ? 'bg-[var(--accent)]/5' : ''}`}>
+                        <td className="p-3 font-mono">{formatRows(point.rows)}</td>
+                        <td className="p-3 text-right font-mono text-[var(--error)]">
+                          {point.originalMs >= 0 ? point.originalMs.toFixed(2) : <span className="italic text-[var(--muted)]">skipped</span>}
+                        </td>
+                        <td className="p-3 text-right font-mono text-[var(--success)]">
+                          {point.optimizedMs >= 0 ? point.optimizedMs.toFixed(2) : <span className="italic text-[var(--muted)]">skipped</span>}
+                        </td>
+                        <td className="p-3 text-right font-mono text-[var(--accent)]">
+                          {point.originalMs >= 0 && point.optimizedMs > 0 ? (point.originalMs / point.optimizedMs).toFixed(2) + "×" : "—"}
+                        </td>
+                        <td className="p-3 text-right font-mono text-[var(--muted)]">
+                          {point.originalMs > 0 ? ((point.rows / point.originalMs) * 1000).toFixed(0) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -483,11 +765,11 @@ export function PerformanceTab() {
             <div className="grid grid-cols-2 gap-4 p-4">
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wide mb-2 text-[var(--error)] flex items-center justify-between">
-                  <span>Before (No Indexes)</span>
-                  {verifyResult && <span className="font-mono">{verifyResult.beforeMs.toFixed(1)}ms</span>}
+                  <span>Original Query</span>
+                  {compareResult && <span className="font-mono">{compareResult.beforeMs.toFixed(1)}ms</span>}
                 </div>
                 <pre className="text-[10px] font-mono rounded-lg px-3 py-2 whitespace-pre-wrap bg-[var(--surface3)] border border-[var(--error)]/20 text-[var(--muted)] max-h-[200px] overflow-y-auto">
-                  {planBefore || "—"}
+                  {originalError ? `⚠ ${originalError}` : (planBefore || "—")}
                 </pre>
                 {planBeforeRaw.length > 0 && (
                   <div className="mt-2 space-y-1">
@@ -501,11 +783,11 @@ export function PerformanceTab() {
               </div>
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wide mb-2 text-[var(--success)] flex items-center justify-between">
-                  <span>After (With Indexes)</span>
-                  {verifyResult && <span className="font-mono">{verifyResult.afterMs.toFixed(1)}ms</span>}
+                  <span>Optimized Query</span>
+                  {compareResult && <span className="font-mono">{compareResult.afterMs.toFixed(1)}ms</span>}
                 </div>
                 <pre className="text-[10px] font-mono rounded-lg px-3 py-2 whitespace-pre-wrap bg-[var(--surface3)] border border-[var(--success)]/20 text-[var(--muted)] max-h-[200px] overflow-y-auto">
-                  {planAfter || "—"}
+                  {optimizedError ? `⚠ ${optimizedError}` : (planAfter || "—")}
                 </pre>
                 {planAfterRaw.length > 0 && (
                   <div className="mt-2 space-y-1">
@@ -518,18 +800,27 @@ export function PerformanceTab() {
                 )}
               </div>
             </div>
-            {verifyResult && (
+            {compareResult && queriesIdentical && !suggestedIndexActuallyUsed && (
+              <div className="px-4 pb-2">
+                <div className="p-3 rounded-lg text-xs" style={{ color: "var(--warning)", background: "color-mix(in srgb, var(--warning) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--warning) 35%, transparent)" }}>
+                  ⚠ The plans above look identical because SQLite chose <em>not</em> to use the suggested index for this run.
+                  Every table here already has a baseline index on its own <code>id</code> column (so subquery-heavy queries don't take forever to benchmark) —
+                  for this particular query, that baseline index already covers the WHERE/ORDER BY access pattern just as well, so the additional suggested index made no real difference.
+                </div>
+              </div>
+            )}
+            {compareResult && (
               <div className="px-4 pb-4">
-                <div className={`p-3 rounded-lg flex items-center gap-3 ${verifyResult.afterMs < verifyResult.beforeMs ? 'bg-[var(--success)]/5 border border-[var(--success)]/20' : 'bg-[var(--warning)]/5 border border-[var(--warning)]/20'}`}>
-                  <span className="text-lg">{verifyResult.afterMs < verifyResult.beforeMs ? '🚀' : '⚠️'}</span>
+                <div className={`p-3 rounded-lg flex items-center gap-3 ${compareResult.afterMs < compareResult.beforeMs ? 'bg-[var(--success)]/5 border border-[var(--success)]/20' : 'bg-[var(--warning)]/5 border border-[var(--warning)]/20'}`}>
+                  <span className="text-lg">{compareResult.afterMs < compareResult.beforeMs ? '🚀' : '⚠️'}</span>
                   <div>
                     <p className="text-sm font-medium">
-                      {verifyResult.afterMs < verifyResult.beforeMs
-                        ? `Speedup: ${(verifyResult.beforeMs / verifyResult.afterMs).toFixed(2)}× faster with indexes`
-                        : "No significant improvement — indexes may not cover this query"}
+                      {compareResult.afterMs < compareResult.beforeMs
+                        ? `Speedup: ${(compareResult.beforeMs / compareResult.afterMs).toFixed(2)}× faster with the optimized query`
+                        : "No significant improvement — the optimized query may not be better suited to this access pattern"}
                     </p>
                     <p className="text-[10px] text-[var(--muted)]">
-                      Before: {verifyResult.beforeMs.toFixed(2)}ms → After: {verifyResult.afterMs.toFixed(2)}ms
+                      Original: {compareResult.beforeMs.toFixed(2)}ms → Optimized: {compareResult.afterMs.toFixed(2)}ms
                     </p>
                   </div>
                 </div>
@@ -539,8 +830,15 @@ export function PerformanceTab() {
 
           {/* Index Analysis */}
           <div className="card overflow-hidden">
-            <div className="px-4 py-2.5 bg-[var(--surface)] border-b border-[var(--border)]">
+            <div className="px-4 py-2.5 bg-[var(--surface)] border-b border-[var(--border)] flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">Index Analysis</span>
+              {indexDdl.length > 0 && (
+                <span className="text-[10px]" style={{ color: usingAiSuggestedIndexes ? "var(--success)" : "var(--muted)" }}>
+                  {usingAiSuggestedIndexes
+                    ? "✓ From AI Optimizer analysis"
+                    : "Auto-derived from the optimized query's pattern — run AI Optimizer for tailored suggestions"}
+                </span>
+              )}
             </div>
             <div className="p-4 space-y-3">
               {indexDdl.length === 0 ? (
@@ -580,17 +878,17 @@ export function PerformanceTab() {
               {complexity.factors.includes("LIKE pattern") && (
                 <TipCard icon="🔍" title="LIKE with Leading Wildcard" text="LIKE '%text' cannot use indexes. Consider full-text search or trigram indexes." type="error" />
               )}
-              {!visualizerSQL.includes("WHERE") && (
+              {!perfOriginalSQL.includes("WHERE") && (
                 <TipCard icon="⚠️" title="No WHERE Clause" text="Missing WHERE clause causes full table scans. Add filters to reduce rows scanned." type="error" />
               )}
-              {visualizerSQL.includes("SELECT *") && (
+              {perfOriginalSQL.includes("SELECT *") && (
                 <TipCard icon="📋" title="SELECT * Detected" text="Selecting all columns increases I/O. Specify only needed columns." type="warning" />
               )}
               {speedup !== "—" && parseFloat(speedup) < 1.2 && (
-                <TipCard icon="💡" title="Limited Index Benefit" text="Current indexes show minimal improvement. Consider composite indexes or query restructuring." type="info" />
+                <TipCard icon="💡" title="Limited Speedup" text="The optimized query shows minimal improvement over the original. Consider a different rewrite or composite indexes." type="info" />
               )}
               {parseFloat(speedup) > 2 && (
-                <TipCard icon="🚀" title="Great Index Performance" text={`${speedup}x speedup achieved! Indexes are well-matched to this query pattern.`} type="success" />
+                <TipCard icon="🚀" title="Great Optimization" text={`${speedup}x speedup achieved! The optimized query is well-matched to this access pattern.`} type="success" />
               )}
               <TipCard icon="📊" title="Synthetic Data Note" text="Benchmarks use randomly generated data. Real-world performance may vary based on data distribution." type="info" />
             </div>
@@ -607,7 +905,7 @@ export function PerformanceTab() {
                   <thead>
                     <tr className="border-b border-[var(--border)] bg-[var(--surface)]">
                       <th className="text-left p-3 text-[var(--muted)]">Time</th>
-                      <th className="text-left p-3 text-[var(--muted)]">Query</th>
+                      <th className="text-left p-3 text-[var(--muted)]">Original Query</th>
                       <th className="text-right p-3 text-[var(--accent)]">Speedup</th>
                     </tr>
                   </thead>
@@ -632,15 +930,15 @@ export function PerformanceTab() {
             </div>
             <div className="grid grid-cols-2 gap-5 p-4">
               <div>
-                <div className="text-[10px] font-bold uppercase tracking-wide mb-2 text-[var(--error)]">Current plan (no suggested indexes)</div>
+                <div className="text-[10px] font-bold uppercase tracking-wide mb-2 text-[var(--error)]">Original query plan</div>
                 <pre className="text-[10.5px] font-mono rounded-lg px-3 py-2 whitespace-pre-wrap bg-[var(--surface3)] border border-[var(--border)] text-[var(--muted)]">
-                  {planBefore || "—"}
+                  {originalError ? `⚠ ${originalError}` : (planBefore || "—")}
                 </pre>
               </div>
               <div>
-                <div className="text-[10px] font-bold uppercase tracking-wide mb-2 text-[var(--success)]">Suggested indexes to apply</div>
+                <div className="text-[10px] font-bold uppercase tracking-wide mb-2 text-[var(--success)]">Optimized query plan (with suggested indexes)</div>
                 <pre className="text-[10.5px] font-mono rounded-lg px-3 py-2 whitespace-pre-wrap bg-[var(--surface3)] border border-[var(--border)] text-[var(--muted)]">
-                  {planAfter || "—"}
+                  {optimizedError ? `⚠ ${optimizedError}` : (planAfter || "—")}
                 </pre>
               </div>
             </div>
