@@ -80,7 +80,7 @@ export function SchemaPanel() {
         `min-h-0` overrides that default and lets the child actually clip
         and scroll within the space the flex parent gives it. */}
     <aside
-      style={{ width: 328, background: "var(--surface)", borderRight: "1px solid var(--border)", boxShadow: "var(--shadow)" }}
+      style={{ width: 420, background: "var(--surface)", borderRight: "1px solid var(--border)", boxShadow: "var(--shadow)" }}
       className="flex flex-col flex-shrink-0 h-full min-h-0 overflow-hidden relative z-10"
     >
       {/* Header */}
@@ -103,17 +103,19 @@ export function SchemaPanel() {
             + Table
           </button>
         </div>
-        <label className="btn-secondary !py-1.5 !text-[11px] cursor-pointer w-full">
-          📂 Import CSV
-          <input type="file" accept=".csv" className="hidden" onChange={handleCSV} />
-        </label>
+        <div className="flex gap-1.5">
+          <label className="btn-secondary !py-1.5 !text-[11px] cursor-pointer flex-1 flex items-center justify-center whitespace-nowrap">
+            📂 Import CSV
+            <input type="file" accept=".csv" className="hidden" onChange={handleCSV} />
+          </label>
 
-        <button
-          onClick={() => setShowSchemaImport(true)}
-          className="btn-secondary !py-1.5 !text-[11px] w-full"
-        >
-          🧬 Import SQL Schema
-        </button>
+          <button
+            onClick={() => setShowSchemaImport(true)}
+            className="btn-secondary !py-1.5 !text-[11px] flex-1 whitespace-nowrap"
+          >
+            🧬 Import SQL Schema
+          </button>
+        </div>
 
         <div className="flex flex-col gap-1">
           <span className="text-[10px] font-medium" style={{ color: "var(--muted)" }}>Sample dataset:</span>
@@ -184,8 +186,8 @@ export function SchemaPanel() {
                   {cols.map((col) => (
                     <div
                       key={col}
-                      className="group flex items-center gap-1 pl-2 pr-1"
-                      style={{ borderRight: "1px solid var(--border)", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}
+                      className="flex items-center gap-1 pl-2 pr-1"
+                      style={{ boxShadow: "inset -1px 0 0 var(--border), inset 0 -1px 0 var(--border)", background: "var(--surface)" }}
                     >
                       <input
                         defaultValue={col}
@@ -194,46 +196,35 @@ export function SchemaPanel() {
                         style={{ background: "transparent", color: "var(--muted2)" }}
                         title={col}
                       />
-                      {/* Remove-column button — hidden until you hover the
-                          header so column names stay readable at rest, and
-                          disabled once a table is down to its last column. */}
-                      <button
-                        onClick={() => dropColumn(tbl, col)}
-                        disabled={cols.length <= 1}
-                        title={cols.length <= 1 ? "A table needs at least one column" : `Remove column "${col}"`}
-                        className="btn-danger-ghost !text-[9px] !px-1 !py-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity disabled:opacity-0"
-                      >
-                        ×
-                      </button>
                     </div>
                   ))}
                   <div
                     className="sticky right-0 z-10"
                     style={{
-                      borderBottom: "1px solid var(--border)",
-                      borderLeft: "1px solid var(--border)",
+                      boxShadow: "inset 1px 0 0 var(--border), inset 0 -1px 0 var(--border), -6px 0 8px -6px rgba(0,0,0,0.45)",
                       background: "var(--surface)",
-                      boxShadow: "-6px 0 8px -6px rgba(0,0,0,0.45)",
                     }}
                   />
                 </div>
 
                 {/* Rows */}
-                {rows.slice(0, 30).map((row, ri) => (
+                {rows.slice(0, 30).map((row, ri) => {
+                  const rowBg = ri % 2 === 1 ? "var(--surface3)" : "var(--surface2)";
+                  return (
                   <div
                     key={ri}
                     className="grid group/row"
                     style={{
                       gridTemplateColumns: `repeat(${cols.length}, minmax(92px,1fr)) 26px`,
-                      borderBottom: "1px solid var(--border)",
-                      background: ri % 2 === 1 ? "var(--surface3)" : "transparent",
+                      boxShadow: "inset 0 -1px 0 var(--border)",
+                      background: rowBg,
                     }}
                   >
                     {cols.map((col) => (
                       <div
                         key={col}
-                        className="group-hover/row:bg-[var(--accent-soft)] transition-colors"
-                        style={{ borderRight: "1px solid var(--border)" }}
+                        className="group-hover/row:!bg-[var(--accent-soft)] transition-colors"
+                        style={{ boxShadow: "inset -1px 0 0 var(--border)", background: rowBg }}
                       >
                         <input
                           defaultValue={row[col] ?? ""}
@@ -257,20 +248,62 @@ export function SchemaPanel() {
                     <div
                       className="sticky right-0 z-10 flex items-center justify-center group-hover/row:!bg-[var(--accent-soft)] transition-colors"
                       style={{
-                        borderLeft: "1px solid var(--border)",
-                        background: ri % 2 === 1 ? "var(--surface3)" : "var(--surface2)",
-                        boxShadow: "-6px 0 8px -6px rgba(0,0,0,0.45)",
+                        boxShadow: "inset 1px 0 0 var(--border), -6px 0 8px -6px rgba(0,0,0,0.45)",
+                        background: rowBg,
                       }}
                     >
                       <button
                         onClick={() => dropRow(tbl, ri)}
-                        className="btn-danger-ghost !text-[10px] opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity"
+                        title={`Remove row ${ri + 1}`}
+                        className="btn-danger-ghost !text-[10px]"
+                        style={{ color: "var(--error)" }}
                       >
                         ×
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
+
+                {/* Dedicated column-removal row — sits at the very bottom of
+                    the scrollable grid, directly above the horizontal
+                    scrollbar, mirroring the sticky row-removal column on the
+                    right. Gives every column its own always-visible "×" here
+                    instead of only on hover in the header, so adding/removing
+                    columns is as easy as adding/removing rows. */}
+                <div
+                  className="grid"
+                  style={{
+                    gridTemplateColumns: `repeat(${cols.length}, minmax(92px,1fr)) 26px`,
+                    boxShadow: "inset 0 1px 0 var(--border)",
+                    background: "var(--surface3)",
+                  }}
+                >
+                  {cols.map((col) => (
+                    <div
+                      key={col}
+                      className="flex items-center justify-center py-1"
+                      style={{ boxShadow: "inset -1px 0 0 var(--border)" }}
+                    >
+                      <button
+                        onClick={() => dropColumn(tbl, col)}
+                        disabled={cols.length <= 1}
+                        title={cols.length <= 1 ? "A table needs at least one column" : `Remove column "${col}"`}
+                        className="btn-danger-ghost !text-[10px] disabled:opacity-30"
+                        style={{ color: cols.length <= 1 ? undefined : "var(--error)" }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <div
+                    className="sticky right-0 z-10"
+                    style={{
+                      boxShadow: "inset 1px 0 0 var(--border), -6px 0 8px -6px rgba(0,0,0,0.45)",
+                      background: "var(--surface3)",
+                    }}
+                  />
+                </div>
               </div>
 
               {/* Actions — always visible below the table's rows */}

@@ -30,7 +30,9 @@ export function VisualizerTab() {
     pipeline,
     setPipeline,
     updateStepStatus,
+    queryResult,
     setQueryResult,
+    error,
     setError,
     isRunning,
     setIsRunning,
@@ -126,9 +128,10 @@ export function VisualizerTab() {
   }, [visualizerSQL, tableData, animSpeed, isRunning, setPipeline, updateStepStatus, setQueryResult, setError, setIsRunning]);
 
   return (
+    <>
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 h-full">
       {/* ── Left: editor + pipeline ── */}
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-5 min-h-0 overflow-y-auto pr-1">
         <div className="card card-accent-blue p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="panel-heading">
@@ -154,16 +157,16 @@ export function VisualizerTab() {
             value={visualizerSQL}
             onChange={setVisualizerSQL}
             placeholder="Write your SQL query here..."
-            minHeight={200}
+            minHeight={340}
           />
         </div>
 
-        <div className="card card-accent-violet p-4 flex-1">
+        <div className="card card-accent-violet p-4 flex-shrink-0">
           <h3 className="panel-heading mb-3">
             <span className="panel-dot" style={{ background: "var(--accent-violet)" }} />
             Execution Plan
           </h3>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {pipeline.length === 0 ? (
               <p className="text-sm text-[var(--muted)] italic">Awaiting query…</p>
             ) : (
@@ -171,22 +174,16 @@ export function VisualizerTab() {
             )}
           </div>
         </div>
-
-        {useStore.getState().error && (
-          <div className="p-3 rounded-lg bg-[var(--error-soft)] border border-[var(--error)]/30 text-[var(--error)] text-sm">
-            ⚠ {useStore.getState().error}
-          </div>
-        )}
       </div>
 
       {/* ── Right: animation stage + results ── */}
-      <div className="flex flex-col gap-5">
-        <div className="card card-accent-teal p-4 flex-1 min-h-[300px]">
-          <h3 className="panel-heading mb-3">
+      <div className="flex flex-col gap-5 min-h-0">
+        <div className="card card-accent-teal p-4 flex-1 min-h-[300px] flex flex-col">
+          <h3 className="panel-heading mb-3 flex-shrink-0">
             <span className="panel-dot" style={{ background: "var(--accent-teal)" }} />
             Process Visualization
           </h3>
-          <div className="space-y-4 overflow-auto max-h-[500px]">
+          <div className="space-y-4 overflow-auto flex-1 min-h-0">
             {frames.length === 0 ? (
               <EmptyStage />
             ) : (
@@ -206,28 +203,38 @@ export function VisualizerTab() {
           </div>
         </div>
 
-        <div className="card card-accent-amber p-4">
+        <div className="card card-accent-amber p-4 flex-shrink-0">
           <div className="flex items-center justify-between mb-3">
             <h3 className="panel-heading">
               <span className="panel-dot" style={{ background: "var(--accent-amber)" }} />
               Output
             </h3>
             <span className="text-xs font-semibold text-[var(--muted)] px-2 py-0.5 rounded-full" style={{ background: "var(--surface3)", border: "1px solid var(--border)" }}>
-              {useStore.getState().queryResult ? `${useStore.getState().queryResult!.values.length} rows` : "—"}
+              {queryResult ? `${queryResult.values.length} rows` : "—"}
             </span>
           </div>
-          {useStore.getState().queryResult && (
-            <div className="overflow-auto max-h-[200px] rounded-lg border border-[var(--border)]">
+          {/* Always mounted so the reveal/collapse animates (max-height +
+              opacity transition) instead of the table just popping in or
+              the card instantly snapping back to its empty size. */}
+          <div
+            className="overflow-hidden rounded-lg border border-[var(--border)] transition-[max-height,opacity] duration-500 ease-in-out"
+            style={{
+              maxHeight: queryResult ? 260 : 0,
+              opacity: queryResult ? 1 : 0,
+              borderColor: queryResult ? "var(--border)" : "transparent",
+            }}
+          >
+            <div className="overflow-auto max-h-[260px]">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-[var(--border)]" style={{ background: "var(--surface3)" }}>
-                    {useStore.getState().queryResult!.columns.map((c) => (
+                    {(queryResult?.columns ?? []).map((c) => (
                       <th key={c} className="text-left p-2 font-semibold text-[var(--muted)]">{c}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {useStore.getState().queryResult!.values.map((row, i) => (
+                  {(queryResult?.values ?? []).map((row, i) => (
                     <tr key={`row-${i}`} className="border-b border-[var(--border)]/50 hover:bg-[var(--surface3)] transition-colors">
                       {row.map((v, j) => (
                         <td key={`cell-${i}-${j}`} className="p-2 font-mono text-xs">{String(v ?? "")}</td>
@@ -237,10 +244,50 @@ export function VisualizerTab() {
                 </tbody>
               </table>
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>
+
+    {/* Error modal — centered, blurred backdrop, so a query error is
+        impossible to miss instead of being one more card a new user has
+        to scroll down to notice. */}
+    {error && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+        onClick={() => setError(null)}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="card w-[480px] max-w-[90vw] p-5"
+          style={{ borderTop: "3px solid var(--error)", boxShadow: "var(--shadow-lg)" }}
+        >
+          <div className="flex items-start gap-3">
+            <span
+              className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-[16px]"
+              style={{ background: "var(--error-soft)", color: "var(--error)" }}
+            >
+              ⚠
+            </span>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-semibold text-[14px] mb-1" style={{ color: "var(--error)" }}>
+                Query failed
+              </h3>
+              <p className="text-[13px] font-mono break-words" style={{ color: "var(--text)" }}>
+                {error}
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end mt-4">
+            <button onClick={() => setError(null)} className="btn-primary !py-1.5 !px-4 !text-[13px]">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -260,14 +307,14 @@ function PipelineStepRow({ step }: { step: PipelineStep }) {
 
   return (
     <div
-      className="flex items-center gap-3 p-3 rounded-lg border text-sm transition-colors duration-300"
+      className="flex items-center gap-2 py-1.5 px-2.5 rounded-md border text-[12px] transition-colors duration-300"
       style={{
         borderColor: borders[step.status],
         backgroundColor: step.status === "active" ? "var(--accent-violet-soft)" : "var(--surface3)",
       }}
     >
       <span
-        className="w-2 h-2 rounded-full shrink-0"
+        className="w-1.5 h-1.5 rounded-full shrink-0"
         style={{ backgroundColor: colors[step.status] }}
       />
       <span className="font-semibold" style={{ color: colors[step.status] }}>
@@ -275,7 +322,7 @@ function PipelineStepRow({ step }: { step: PipelineStep }) {
         {step.alias ? ` ${step.alias}` : ""}
       </span>
       {step.status === "active" && (
-        <span className="ml-auto text-xs font-medium animate-pulse" style={{ color: colors[step.status] }}>
+        <span className="ml-auto text-[10px] font-medium animate-pulse" style={{ color: colors[step.status] }}>
           running…
         </span>
       )}

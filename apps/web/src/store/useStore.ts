@@ -2,26 +2,11 @@ import { create } from "zustand";
 import type { TableData, PipelineStep, QueryResult, OptimizationResult, VerifyIndexResult } from "@/types";
 import { SAMPLE_DATASETS } from "@/lib/data/datasets";
 
-const DEFAULT_DATA: TableData = {
-  Products: [
-    { id: 1, name: "Laptop", price: 1200, category: "Electronics" },
-    { id: 2, name: "Mouse", price: 25, category: "Peripherals" },
-    { id: 3, name: "Monitor", price: 300, category: "Electronics" },
-    { id: 4, name: "Keyboard", price: 75, category: "Peripherals" },
-  ],
-  Customers: [
-    { id: 1, name: "Alice", country: "US" },
-    { id: 2, name: "Bob", country: "UK" },
-    { id: 3, name: "Carol", country: "US" },
-  ],
-  Orders: [
-    { id: 101, customer_id: 1, product_id: 1, quantity: 1 },
-    { id: 102, customer_id: 2, product_id: 2, quantity: 2 },
-    { id: 103, customer_id: 1, product_id: 3, quantity: 1 },
-    { id: 104, customer_id: 3, product_id: 4, quantity: 3 },
-    { id: 105, customer_id: 2, product_id: 1, quantity: 1 },
-  ],
-};
+// The default table set shown on first load reuses the (larger) E-commerce
+// sample dataset below, so the two never drift out of sync and the app
+// always starts with a reasonably-sized, representative schema instead of
+// a tiny hand-maintained duplicate.
+const DEFAULT_DATA: TableData = SAMPLE_DATASETS.ecommerce.data;
 
 interface AppState {
   tableData: TableData;
