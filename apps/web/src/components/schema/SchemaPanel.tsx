@@ -72,9 +72,16 @@ export function SchemaPanel() {
 
   return (
     <>
+    {/* `h-full min-h-0` on the aside, plus `min-h-0` on the scrolling child
+        below, is the actual fix. Flex items default to `min-height: auto`,
+        which means a flex child refuses to shrink below its own content
+        height no matter what you put on it — so adding a row just grew this
+        whole panel downward instead of ever triggering `overflow-y-auto`.
+        `min-h-0` overrides that default and lets the child actually clip
+        and scroll within the space the flex parent gives it. */}
     <aside
-      style={{ width: 272, background: "var(--surface)", borderRight: "1px solid var(--border)", boxShadow: "var(--shadow)" }}
-      className="flex flex-col flex-shrink-0 overflow-hidden relative z-10"
+      style={{ width: 328, background: "var(--surface)", borderRight: "1px solid var(--border)", boxShadow: "var(--shadow)" }}
+      className="flex flex-col flex-shrink-0 h-full min-h-0 overflow-hidden relative z-10"
     >
       {/* Header */}
       <div
@@ -123,17 +130,20 @@ export function SchemaPanel() {
         </div>
       </div>
 
-      {/* Table list */}
-      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3" style={{ background: "var(--bg)" }}>
+      {/* Table list — the scrolling region. `min-h-0` is what lets this
+          shrink and scroll instead of forcing the aside to grow. */}
+      <div
+        className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3"
+        style={{ background: "var(--bg)" }}
+      >
         {Object.keys(tableData).map((tbl) => {
           const rows = tableData[tbl];
           const cols = rows[0] ? Object.keys(rows[0]) : ["id"];
-          const colCount = cols.length + 1; // +1 for delete btn
 
           return (
             <div
               key={tbl}
-              className="rounded-xl overflow-hidden"
+              className="rounded-xl overflow-hidden flex-shrink-0"
               style={{ border: "1px solid var(--border)", background: "var(--surface2)", boxShadow: "var(--shadow)" }}
             >
               {/* Table header */}
@@ -160,63 +170,101 @@ export function SchemaPanel() {
                 </div>
               </div>
 
-              {/* Grid */}
+              {/* Grid — this scrolls horizontally when columns are added
+                  (overflow-x-auto), same idea as the vertical fix above.
+                  Data columns get a real 92px minimum and the trailing
+                  row-action column is a fixed 26px so it never stretches
+                  wider than its "×" button needs. */}
               <div className="overflow-x-auto">
                 {/* Column headers */}
                 <div
                   className="grid"
-                  style={{ gridTemplateColumns: `repeat(${colCount}, minmax(48px,1fr))` }}
+                  style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(92px,1fr)) 26px` }}
                 >
                   {cols.map((col) => (
                     <div
                       key={col}
-                      className="flex items-center"
+                      className="group flex items-center gap-1 pl-2 pr-1"
                       style={{ borderRight: "1px solid var(--border)", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}
                     >
                       <input
                         defaultValue={col}
                         onBlur={(e) => renameColumn(tbl, col, e.target.value)}
-                        className="flex-1 min-w-0 px-1.5 py-1 font-mono text-[10.5px] font-semibold outline-none"
+                        className="flex-1 min-w-0 py-2 font-mono text-[11px] font-semibold outline-none truncate"
                         style={{ background: "transparent", color: "var(--muted2)" }}
                         title={col}
                       />
+                      {/* Remove-column button — hidden until you hover the
+                          header so column names stay readable at rest, and
+                          disabled once a table is down to its last column. */}
                       <button
                         onClick={() => dropColumn(tbl, col)}
                         disabled={cols.length <= 1}
                         title={cols.length <= 1 ? "A table needs at least one column" : `Remove column "${col}"`}
-                        className="btn-danger-ghost !text-[9px] !px-1 !py-0 mr-0.5 flex-shrink-0 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--muted)]"
+                        className="btn-danger-ghost !text-[9px] !px-1 !py-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity disabled:opacity-0"
                       >
                         ×
                       </button>
                     </div>
                   ))}
-                  <div style={{ borderBottom: "1px solid var(--border)" }} />
+                  <div
+                    className="sticky right-0 z-10"
+                    style={{
+                      borderBottom: "1px solid var(--border)",
+                      borderLeft: "1px solid var(--border)",
+                      background: "var(--surface)",
+                      boxShadow: "-6px 0 8px -6px rgba(0,0,0,0.45)",
+                    }}
+                  />
                 </div>
 
                 {/* Rows */}
                 {rows.slice(0, 30).map((row, ri) => (
                   <div
                     key={ri}
-                    className="grid"
-                    style={{ gridTemplateColumns: `repeat(${colCount}, minmax(48px,1fr))`, borderBottom: "1px solid var(--border)" }}
+                    className="grid group/row"
+                    style={{
+                      gridTemplateColumns: `repeat(${cols.length}, minmax(92px,1fr)) 26px`,
+                      borderBottom: "1px solid var(--border)",
+                      background: ri % 2 === 1 ? "var(--surface3)" : "transparent",
+                    }}
                   >
                     {cols.map((col) => (
-                      <div key={col} style={{ borderRight: "1px solid var(--border)" }}>
+                      <div
+                        key={col}
+                        className="group-hover/row:bg-[var(--accent-soft)] transition-colors"
+                        style={{ borderRight: "1px solid var(--border)" }}
+                      >
                         <input
                           defaultValue={row[col] ?? ""}
                           onBlur={(e) => {
                             const v = e.target.value;
                             updateCell(tbl, ri, col, !isNaN(Number(v)) && v !== "" ? Number(v) : v || null);
                           }}
-                          className="w-full px-1.5 py-1 font-mono text-[11px] outline-none"
+                          title={String(row[col] ?? "")}
+                          className="w-full px-2 py-1.5 font-mono text-[11.5px] outline-none truncate"
                           style={{ background: "transparent", color: "var(--text)" }}
                         />
                       </div>
                     ))}
-                    <div className="flex items-center justify-center">
+                    {/* Sticky delete-row cell — pinned to the right edge of
+                        the card (not the page) so removing a row never
+                        requires scrolling all the way across the table
+                        first. Needs its own opaque background matching the
+                        row's stripe, otherwise scrolled columns would show
+                        through behind it; the `!` on the hover class forces
+                        it to win over that inline background-color. */}
+                    <div
+                      className="sticky right-0 z-10 flex items-center justify-center group-hover/row:!bg-[var(--accent-soft)] transition-colors"
+                      style={{
+                        borderLeft: "1px solid var(--border)",
+                        background: ri % 2 === 1 ? "var(--surface3)" : "var(--surface2)",
+                        boxShadow: "-6px 0 8px -6px rgba(0,0,0,0.45)",
+                      }}
+                    >
                       <button
                         onClick={() => dropRow(tbl, ri)}
-                        className="btn-danger-ghost !text-[10px]"
+                        className="btn-danger-ghost !text-[10px] opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity"
                       >
                         ×
                       </button>
@@ -225,23 +273,28 @@ export function SchemaPanel() {
                 ))}
               </div>
 
-              {/* Actions */}
-              <div className="flex" style={{ borderTop: "1px solid var(--border)", background: "var(--surface3)" }}>
-                {[["+ Row", () => addRow(tbl)], ["+ Col", () => addColumn(tbl)]].map(
-                  ([label, fn], i) => (
-                    <button
-                      key={label as string}
-                      onClick={fn as () => void}
-                      className="flex-1 py-1.5 text-[11px] font-semibold transition-colors hover:bg-[var(--surface)] hover:text-[var(--accent)]"
-                      style={{
-                        color: "var(--muted)",
-                        borderRight: i === 0 ? "1px solid var(--border)" : "none",
-                      }}
-                    >
-                      {label as string}
-                    </button>
-                  )
-                )}
+              {/* Actions — always visible below the table's rows */}
+              <div
+                className="flex flex-shrink-0"
+                style={{ borderTop: "1px solid var(--border)", background: "var(--surface3)" }}
+              >
+                {[
+                  ["＋ Row", () => addRow(tbl), "Add a new row to this table"],
+                  ["＋ Col", () => addColumn(tbl), "Add a new column to this table"],
+                ].map(([label, fn, tip], i) => (
+                  <button
+                    key={label as string}
+                    onClick={fn as () => void}
+                    title={tip as string}
+                    className="flex-1 flex items-center justify-center gap-1 py-2 text-[11.5px] font-bold transition-colors hover:bg-[var(--accent-soft)]"
+                    style={{
+                      color: "var(--accent)",
+                      borderRight: i === 0 ? "1px solid var(--border)" : "none",
+                    }}
+                  >
+                    {label as string}
+                  </button>
+                ))}
               </div>
             </div>
           );
