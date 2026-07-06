@@ -35,7 +35,8 @@ JSON shape:
   "explanation": "...",
   "index_statements": ["CREATE INDEX ...", "..."],
   "scan_type_before": "...",
-  "scan_type_after": "..."
+  "scan_type_after": "...",
+  "result_equivalence": { "equivalent": true, "reasoning": "..." }
 }
 
 Rules:
@@ -45,6 +46,24 @@ Rules:
 - index_statements: exact DDL the user can run immediately
 - scan_type_before: base this on the actual EXPLAIN QUERY PLAN output below if provided
 - scan_type_after: the scan type you expect once index_statements are applied
+- result_equivalence: you MUST reason step-by-step (internally) about whether optimized_sql
+  returns the exact same result set as the original query for ANY valid data in this schema,
+  not just the sample data — same rows, same columns, same values. Only differences in row
+  ORDER are allowed to be ignored (treat the result as a set) unless the original query has an
+  explicit ORDER BY that must be preserved.
+  - Watch specifically for: rewriting an implicit CROSS/comma JOIN as an INNER JOIN and
+    accidentally changing which rows survive; adding/removing DISTINCT; changing LEFT JOIN to
+    INNER JOIN (drops unmatched rows); changing aggregate functions or GROUP BY columns;
+    adding a LIMIT that wasn't there; narrowing or widening the SELECT column list; adding a
+    WHERE/HAVING predicate that filters out rows the original query returned; changing JOIN
+    conditions in a way that changes cardinality (fan-out/fan-in).
+  - "equivalent": true only if you are confident optimized_sql is guaranteed to return the same
+    result set as the original for any data. If the rewrite intentionally changes behavior (e.g.
+    fixes a real correctness bug in the original), or you are not fully certain, set it to false.
+  - "reasoning": ≤80 words. If equivalent is false, explicitly name the specific difference
+    (e.g. "original used LEFT JOIN so customers with no orders were included; optimized_sql
+    uses INNER JOIN which drops them") — this must be specific enough for a human to verify by
+    running both queries, not a vague disclaimer.
 ${planSection}
 Schema:
 ${schemaDescription}

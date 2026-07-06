@@ -43,6 +43,10 @@ export interface OptimizationResult {
   index_statements: string[];
   scan_type_before: string;
   scan_type_after: string;
+  result_equivalence: {
+    equivalent: boolean;
+    reasoning: string;
+  };
 }
 
 // ── API Request / Response shapes (validated with Zod) ────────

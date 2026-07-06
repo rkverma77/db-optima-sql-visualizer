@@ -12,6 +12,10 @@ export const OptimizationResultSchema = z.object({
   index_statements: z.array(z.string()),
   scan_type_before: z.string(),
   scan_type_after: z.string(),
+  result_equivalence: z.object({
+    equivalent: z.boolean(),
+    reasoning: z.string(),
+  }),
 });
 
 export type OptimizationResult = z.infer<typeof OptimizationResultSchema>;

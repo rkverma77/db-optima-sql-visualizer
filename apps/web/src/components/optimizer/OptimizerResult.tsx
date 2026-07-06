@@ -65,6 +65,22 @@ export function OptimizerResult({ result }: Props) {
         </div>
       </section>
 
+      {/* AI self-check: does optimized_sql return the same result set? */}
+      <section
+        className={`p-4 rounded-lg border-l-4 ${
+          result.result_equivalence.equivalent
+            ? "border-[var(--success)] bg-[var(--success)]/10 text-[var(--success)]"
+            : "border-red-500 bg-red-500/10 text-red-400"
+        }`}
+      >
+        <p className="text-sm font-semibold flex items-center gap-2">
+          {result.result_equivalence.equivalent ? "✓ Results should match original" : "⚠ Results may differ from original"}
+        </p>
+        <p className="mt-1 text-sm leading-relaxed opacity-90">
+          {renderWithInlineCode(result.result_equivalence.reasoning)}
+        </p>
+      </section>
+
       {/* Optimized SQL */}
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface2)] overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] bg-[var(--surface)]">
