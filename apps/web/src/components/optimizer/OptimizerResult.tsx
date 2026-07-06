@@ -6,6 +6,10 @@ import { highlightSQL } from "@/lib/sql/engine";
 
 interface Props {
   result: OptimizationResult;
+  /** Re-runs the AI analysis from scratch (same query, fresh call to Gemini).
+   *  Optional so this component still works anywhere it's used without it. */
+  onReanalyze?: () => void;
+  isReanalyzing?: boolean;
 }
 
 // Gemini's free-text fields (issue descriptions, explanation) come back as
@@ -27,7 +31,7 @@ function renderWithInlineCode(text: string) {
   });
 }
 
-export function OptimizerResult({ result }: Props) {
+export function OptimizerResult({ result, onReanalyze, isReanalyzing }: Props) {
   const [copied, setCopied] = useState(false);
 
   const copySQL = async () => {
@@ -73,9 +77,22 @@ export function OptimizerResult({ result }: Props) {
             : "border-red-500 bg-red-500/10 text-red-400"
         }`}
       >
-        <p className="text-sm font-semibold flex items-center gap-2">
-          {result.result_equivalence.equivalent ? "✓ Results should match original" : "⚠ Results may differ from original"}
-        </p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold flex items-center gap-2">
+            {result.result_equivalence.equivalent ? "✓ Results should match original" : "⚠ Results may differ from original"}
+          </p>
+          {!result.result_equivalence.equivalent && onReanalyze && (
+            <button
+              onClick={onReanalyze}
+              disabled={isReanalyzing}
+              title="Send this query to the AI again for a fresh analysis"
+              className="shrink-0 text-xs px-2.5 py-1 rounded-md border font-medium transition disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ borderColor: "color-mix(in srgb, var(--error) 45%, transparent)", color: "var(--error)", background: "color-mix(in srgb, var(--error) 12%, transparent)" }}
+            >
+              {isReanalyzing ? "Re-analyzing…" : "↻ Re-analyze"}
+            </button>
+          )}
+        </div>
         <p className="mt-1 text-sm leading-relaxed opacity-90">
           {renderWithInlineCode(result.result_equivalence.reasoning)}
         </p>

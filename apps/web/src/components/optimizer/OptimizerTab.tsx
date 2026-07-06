@@ -336,7 +336,7 @@ export function OptimizerTab() {
                 and the verify results all live here so the header/button
                 and the card's colored top border never move. */}
             <div className="flex-1 min-h-0 overflow-y-auto mt-3 -mr-2 pr-2">
-              <OptimizerResult result={aiResult} />
+              <OptimizerResult result={aiResult} onReanalyze={runOptimize} isReanalyzing={aiLoading} />
 
               {/* Verify Results */}
               <div ref={verifySectionRef} className="flex flex-col gap-5 mt-6">

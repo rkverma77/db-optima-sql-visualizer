@@ -63,7 +63,7 @@ function estimateMemory(rows: number, tableData: Record<string, any[]>): string 
     const size = JSON.stringify(sample).length;
     return sum + size;
   }, 0) / Math.max(1, Object.values(tableData).filter(r => r.length > 0).length);
-  
+
   const totalBytes = rows * avgRowSize * Object.keys(tableData).length;
   if (totalBytes > 1_000_000_000) return (totalBytes / 1_000_000_000).toFixed(2) + " GB";
   if (totalBytes > 1_000_000) return (totalBytes / 1_000_000).toFixed(2) + " MB";
@@ -80,7 +80,7 @@ function exportToCSV(benchmarks: PerfDataPoint[], originalSQL: string, optimized
     b.optimizedMs >= 0 ? b.optimizedMs.toFixed(3) : "skipped",
     b.originalMs >= 0 && b.optimizedMs > 0 ? (b.originalMs / b.optimizedMs).toFixed(3) : "N/A"
   ]);
-  
+
   const csv = [
     `# Original Query: ${originalSQL.replace(/\n/g, " ")}`,
     `# Optimized Query: ${optimizedSQL.replace(/\n/g, " ")}`,
@@ -108,7 +108,7 @@ function exportToJSON(benchmarks: PerfDataPoint[], originalSQL: string, optimize
     ),
     benchmarks,
   };
-  
+
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -131,6 +131,12 @@ export function PerformanceTab() {
   const [hasComputed, setHasComputed] = useState(false);
   const [computeTime, setComputeTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
+  // Set when the user clicks "Re-analyze": we deliberately do NOT re-run the
+  // benchmark right away. Instead we clear the results so they're back in the
+  // edit view, and surface a banner asking them to revise the queries before
+  // pressing "Run Comparison Benchmark" again. Keeps the expensive compute a
+  // deliberate, user-initiated step instead of a one-click repeat.
+  const [awaitingQueryEdit, setAwaitingQueryEdit] = useState(false);
 
   const [planBefore, setPlanBefore] = useState<string>("");
   const [planAfter, setPlanAfter] = useState<string>("");
@@ -309,11 +315,37 @@ export function PerformanceTab() {
     }
   }, [tableData, perfOriginalSQL, perfOptimizedSQL, indexDdl, dataVolume, isComputing, canRun]);
 
+  // "Re-analyze" intentionally does NOT compute. It clears the previous
+  // results and puts the user back into the edit view, where they can tweak
+  // the original and/or optimized queries. Computing only happens once they
+  // click "Run Comparison Benchmark" — so a re-analysis never silently burns
+  // the (expensive, several-second) benchmark on unchanged queries.
+  const reanalyze = useCallback(() => {
+    if (isComputing) return;
+    setHasComputed(false);
+    setAllBenchmarks([]);
+    setComputeTime(null);
+    setResultsComparison(null);
+    setCompareResult(null);
+    setRunError(null);
+    setOriginalError(null);
+    setOptimizedError(null);
+    setPlanBefore("");
+    setPlanAfter("");
+    setPlanBeforeRaw([]);
+    setPlanAfterRaw([]);
+    setWasCancelled(false);
+    setAwaitingQueryEdit(true);
+  }, [isComputing]);
+
   useEffect(() => {
     setHasComputed(false);
     setAllBenchmarks([]);
     setComputeTime(null);
     setResultsComparison(null);
+    // Editing either query (or the underlying tables/indexes) counts as the
+    // "change the queries" step we asked for, so clear the nudge banner.
+    setAwaitingQueryEdit(false);
   }, [perfOriginalSQL, perfOptimizedSQL, tableData, indexDdl]);
 
   const chartData = useMemo(() => {
@@ -366,7 +398,7 @@ export function PerformanceTab() {
             <span className="panel-dot" style={{ background: "var(--accent-amber)" }} />
             Original vs. Optimized Query
           </h3>
-          <button onClick={computeBenchmarks} disabled={isComputing || !canRun} className="btn-primary" title={!canRun ? "Add an optimized query to compare against." : undefined}>
+          <button onClick={hasComputed ? reanalyze : computeBenchmarks} disabled={isComputing || !canRun} className="btn-primary" title={!canRun ? "Add an optimized query to compare against." : (hasComputed ? "Go back to edit mode so you can revise the queries before re-running." : undefined)}>
             {isComputing ? (
               <>
                 <svg className="animate-spin-slow w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24">
@@ -376,7 +408,7 @@ export function PerformanceTab() {
                 Computing… {formatTime(elapsedTime)}
               </>
             ) : hasComputed ? (
-              <>↻ Re-run</>
+              <>↻ Re-analyze</>
             ) : (
               <>▶ Run Comparison Benchmark</>
             )}
@@ -467,13 +499,25 @@ export function PerformanceTab() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
           </div>
-          
+
           <div>
             <h3 className="text-lg font-semibold mb-1">Performance Benchmark</h3>
             <p className="text-sm text-[var(--muted)] max-w-md">
               Run both queries across {ALL_VOLUMES.length} volume points (1K → 100K rows) against identical synthetic data to generate comparison curves.
             </p>
           </div>
+
+          {awaitingQueryEdit && (
+            <div
+              className="flex items-center gap-2 text-[12px] px-4 py-2 rounded-lg font-medium"
+              style={{ color: "var(--accent)", borderColor: "color-mix(in srgb, var(--accent) 45%, transparent)", background: "color-mix(in srgb, var(--accent) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--accent) 45%, transparent)" }}
+            >
+              <span>✎</span>
+              <span>
+                Edit the queries above (original and/or optimized), then press <strong>Run Comparison Benchmark</strong> to re-compute. The benchmark runs only when you start it — not automatically.
+              </span>
+            </div>
+          )}
 
           <div
             className="flex items-center gap-2 text-[11px] px-3 py-1.5 rounded-full border"
@@ -508,31 +552,6 @@ export function PerformanceTab() {
               </span>
             </div>
           )}
-
-          <div className="flex items-center gap-2">
-            <button onClick={computeBenchmarks} disabled={isComputing || !canRun} className="btn-primary px-6 py-2.5 text-sm">
-              {isComputing ? (
-                <>
-                  <svg className="animate-spin-slow w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Computing… {formatTime(elapsedTime)}
-                </>
-              ) : (
-                <>▶ Run Comparison Benchmark</>
-              )}
-            </button>
-            {isComputing && (
-              <button
-                onClick={() => { cancelRef.current = true; }}
-                className="btn-secondary px-4 py-2.5 text-sm"
-              >
-                ✕ Cancel
-              </button>
-            )}
-          </div>
-
           {isComputing && (
             <div className="w-64 h-1.5 bg-[var(--surface3)] rounded-full overflow-hidden">
               <div className="h-full bg-[var(--accent)] animate-pulse rounded-full" style={{ width: "60%" }} />
@@ -558,19 +577,11 @@ export function PerformanceTab() {
             </div>
             <div className="flex gap-2">
               <button onClick={() => exportToCSV(allBenchmarks, perfOriginalSQL, perfOptimizedSQL)} className="btn-secondary text-xs px-3 py-1.5">
-                📥 CSV
+                📥 Export CSV
               </button>
               <button onClick={() => exportToJSON(allBenchmarks, perfOriginalSQL, perfOptimizedSQL, tableData)} className="btn-secondary text-xs px-3 py-1.5">
-                📥 JSON
+                📥 Export JSON
               </button>
-              <button onClick={computeBenchmarks} disabled={isComputing || !canRun} className="btn-secondary text-xs px-3 py-1.5">
-                {isComputing ? `Computing… ${formatTime(elapsedTime)}` : "↻ Re-run"}
-              </button>
-              {isComputing && (
-                <button onClick={() => { cancelRef.current = true; }} className="btn-secondary text-xs px-3 py-1.5">
-                  ✕ Cancel
-                </button>
-              )}
             </div>
           </div>
 
@@ -597,9 +608,20 @@ export function PerformanceTab() {
                 </div>
               ) : (
                 <div className="p-3 rounded-lg text-[11px]" style={{ color: "var(--error)", background: "color-mix(in srgb, var(--error) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--error) 35%, transparent)" }}>
-                  <div className="flex items-center gap-2 font-medium">
-                    <span>⚠</span>
-                    <span>Results differ — the optimized query may not be equivalent to the original.</span>
+                  <div className="flex items-center justify-between gap-2 font-medium">
+                    <div className="flex items-center gap-2">
+                      <span>⚠</span>
+                      <span>Results differ — the optimized query may not be equivalent to the original.</span>
+                    </div>
+                    <button
+                      onClick={reanalyze}
+                      disabled={isComputing}
+                      className="shrink-0 text-[11px] px-3 py-1 rounded-lg border font-medium"
+                      style={{ color: "var(--error)", borderColor: "color-mix(in srgb, var(--error) 45%, transparent)", background: "color-mix(in srgb, var(--error) 12%, transparent)" }}
+                      title="Go back to the editors so you can fix the optimized query, then re-run the benchmark."
+                    >
+                      ↻ Recheck Optimized Query & Re-analyze
+                    </button>
                   </div>
                   <div className="mt-1 pl-5">{resultsComparison.reason}</div>
                   {resultsComparison.mismatchExamples.length > 0 && (
@@ -1012,7 +1034,7 @@ function TipCard({ icon, title, text, type }: { icon: string; title: string; tex
     info: "border-blue-500 bg-blue-500/10 text-blue-400",
     success: "border-green-500 bg-green-500/10 text-green-400",
   };
-  
+
   return (
     <div className={`p-3 rounded-lg border-l-4 ${colors[type]}`}>
       <div className="flex items-center gap-2 mb-1">
