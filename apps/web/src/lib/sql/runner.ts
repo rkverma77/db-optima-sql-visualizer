@@ -275,6 +275,128 @@ export async function compareQueries(
   return { before: toResult(beforePlanRes), after: toResult(afterPlanRes), beforeMs, afterMs };
 }
 
+export interface ResultSetComparison {
+  /** False whenever anything below indicates the two queries aren't
+   *  returning the same data — the "⚠ results differ" signal. */
+  matches: boolean;
+  originalRowCount: number;
+  optimizedRowCount: number;
+  originalColumns: string[];
+  optimizedColumns: string[];
+  /** Human-readable explanation of the first mismatch found, or null if
+   *  everything checked out. */
+  reason: string | null;
+  /** A few normalized example rows that differ between the two result
+   *  sets, for display — capped, not exhaustive. */
+  mismatchExamples: string[];
+}
+
+/**
+ * A lightweight equivalence check between what the Original and Optimized
+ * queries actually return — row count, column set, and a value comparison
+ * — so an "optimized" query that's faster but subtly wrong (a dropped
+ * filter, a wrong JOIN, an off-by-one in a rewrite) gets flagged instead
+ * of silently passing as a win.
+ *
+ * Rows are compared as a value multiset (each row's values sorted by
+ * column name, then the whole set sorted) rather than in returned order,
+ * since a rewritten query legitimately reordering rows — different JOIN
+ * strategy, no ORDER BY — isn't itself a correctness problem.
+ */
+export async function compareResultSets(
+  originalSql: string,
+  optimizedSql: string,
+  data: Data,
+  indexDdl: string[]
+): Promise<ResultSetComparison> {
+  const SQL = await getSqlJs();
+
+  const dbOriginal = buildDatabase(SQL, data);
+  let originalRes: ReturnType<Database["exec"]>;
+  try {
+    originalRes = dbOriginal.exec(originalSql);
+  } finally {
+    dbOriginal.close();
+  }
+
+  const dbOptimized = buildDatabase(SQL, data);
+  for (const ddl of indexDdl) {
+    try { dbOptimized.run(ddl); } catch { /* skip invalid DDL */ }
+  }
+  let optimizedRes: ReturnType<Database["exec"]>;
+  try {
+    optimizedRes = dbOptimized.exec(optimizedSql);
+  } finally {
+    dbOptimized.close();
+  }
+
+  const originalColumns = originalRes.length ? originalRes[0].columns : [];
+  const optimizedColumns = optimizedRes.length ? optimizedRes[0].columns : [];
+  const originalRows = originalRes.length ? originalRes[0].values : [];
+  const optimizedRows = optimizedRes.length ? optimizedRes[0].values : [];
+
+  const originalRowCount = originalRows.length;
+  const optimizedRowCount = optimizedRows.length;
+
+  const base: Omit<ResultSetComparison, "matches" | "reason" | "mismatchExamples"> = {
+    originalRowCount, optimizedRowCount, originalColumns, optimizedColumns,
+  };
+
+  if (originalRowCount !== optimizedRowCount) {
+    return {
+      ...base,
+      matches: false,
+      mismatchExamples: [],
+      reason: `Row count differs — original returned ${originalRowCount.toLocaleString()} row${originalRowCount === 1 ? "" : "s"}, optimized returned ${optimizedRowCount.toLocaleString()}.`,
+    };
+  }
+
+  const colSetA = [...originalColumns].sort();
+  const colSetB = [...optimizedColumns].sort();
+  const columnsMatch = colSetA.length === colSetB.length && colSetA.every((c, i) => c === colSetB[i]);
+
+  if (!columnsMatch) {
+    return {
+      ...base,
+      matches: false,
+      mismatchExamples: [],
+      reason: `Column set differs — original returns [${originalColumns.join(", ")}], optimized returns [${optimizedColumns.join(", ")}].`,
+    };
+  }
+
+  // Normalize each row by sorting its values in column-name order (so
+  // column reordering/aliasing between the two queries doesn't itself
+  // cause a false mismatch), then sort the whole row set so returned
+  // order doesn't matter either.
+  const normalize = (columns: string[], rows: (string | number | Uint8Array | null)[][]) => {
+    const order = columns.map((_, i) => i).sort((a, b) => columns[a].localeCompare(columns[b]));
+    return rows.map((row) => JSON.stringify(order.map((i) => row[i]))).sort();
+  };
+
+  const normA = originalRowCount > 0 ? normalize(originalColumns, originalRows) : [];
+  const normB = optimizedRowCount > 0 ? normalize(optimizedColumns, optimizedRows) : [];
+
+  const mismatchExamples: string[] = [];
+  let firstMismatchIndex = -1;
+  for (let i = 0; i < normA.length && mismatchExamples.length < 3; i++) {
+    if (normA[i] !== normB[i]) {
+      if (firstMismatchIndex === -1) firstMismatchIndex = i;
+      mismatchExamples.push(`original: ${normA[i]}  ≠  optimized: ${normB[i]}`);
+    }
+  }
+
+  if (mismatchExamples.length > 0) {
+    return {
+      ...base,
+      matches: false,
+      mismatchExamples,
+      reason: `Row count and columns match (${originalRowCount.toLocaleString()} rows), but the returned values differ — the two queries likely aren't equivalent.`,
+    };
+  }
+
+  return { ...base, matches: true, mismatchExamples: [], reason: null };
+}
+
 // ── Benchmark helpers ───────────────────────────────────────────
 
 /**

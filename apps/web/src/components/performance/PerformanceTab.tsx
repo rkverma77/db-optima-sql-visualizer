@@ -8,8 +8,9 @@ import {
 } from "recharts";
 import type { PerfDataPoint } from "@/types";
 import {
-  benchmarkAcrossVolumes, explainQueryPlan, explainQueryPlanWithIndexes, compareQueries, yieldToBrowser,
+  benchmarkAcrossVolumes, explainQueryPlan, explainQueryPlanWithIndexes, compareQueries, compareResultSets, yieldToBrowser,
 } from "@/lib/sql/runner";
+import type { ResultSetComparison } from "@/lib/sql/runner";
 import { generateSyntheticData } from "@/lib/data/datasets";
 import { parsePipeline, deriveIndexSuggestions, highlightSQL } from "@/lib/sql/engine";
 import { SQLEditor } from "@/components/ui/SQLEditor";
@@ -141,6 +142,10 @@ export function PerformanceTab() {
   const [originalError, setOriginalError] = useState<string | null>(null);
   const [optimizedError, setOptimizedError] = useState<string | null>(null);
   const [compareResult, setCompareResult] = useState<any>(null);
+  // Lightweight row-count/column-set/value equivalence check between what
+  // the two queries actually return — catches an "optimized" query that's
+  // faster but subtly wrong (dropped filter, wrong JOIN, etc).
+  const [resultsComparison, setResultsComparison] = useState<ResultSetComparison | null>(null);
 
   const [history, setHistory] = useState<{ id: number; time: string; query: string; speedup: string }[]>([]);
 
@@ -224,6 +229,7 @@ export function PerformanceTab() {
     setComputeTime(null);
     setWasCancelled(false);
     setCompareResult(null);
+    setResultsComparison(null);
     setPlanBefore("");
     setPlanAfter("");
     setPlanBeforeRaw([]);
@@ -274,6 +280,10 @@ export function PerformanceTab() {
           setPlanBeforeRaw(compare.before.raw);
           setPlanAfter(compare.after.summary);
           setPlanAfterRaw(compare.after.raw);
+
+          await yieldToBrowser();
+          const resultCheck = await compareResultSets(perfOriginalSQL, perfOptimizedSQL, scaled, indexDdl);
+          setResultsComparison(resultCheck);
         } else {
           // At least one side is broken — still show a real plan for
           // whichever side works, without blocking on the other.
@@ -303,6 +313,7 @@ export function PerformanceTab() {
     setHasComputed(false);
     setAllBenchmarks([]);
     setComputeTime(null);
+    setResultsComparison(null);
   }, [perfOriginalSQL, perfOptimizedSQL, tableData, indexDdl]);
 
   const chartData = useMemo(() => {
@@ -568,6 +579,41 @@ export function PerformanceTab() {
               {wasCancelled
                 ? "⚠ Benchmark cancelled — showing whatever volumes finished before you stopped it."
                 : "⚠ Some larger volumes were skipped for one or both queries because a smaller one already exceeded the 4s time budget — common with correlated subqueries."}
+            </div>
+          )}
+
+          {/* Result-Set Equivalence — is the "optimized" query actually
+              returning the same data as the original, or just faster and
+              wrong? Row count / column set / value check, run once at the
+              current data-volume slider position. */}
+          {resultsComparison && (
+            <div className="flex-shrink-0">
+              {resultsComparison.matches ? (
+                <div className="flex items-center gap-2 text-[11px] px-3 py-2 rounded-lg" style={{ color: "var(--success)", background: "color-mix(in srgb, var(--success) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--success) 35%, transparent)" }}>
+                  <span>✓</span>
+                  <span>
+                    Results match — both queries returned the same {resultsComparison.originalRowCount.toLocaleString()} row{resultsComparison.originalRowCount === 1 ? "" : "s"} at {formatRows(dataVolume)} rows.
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3 rounded-lg text-[11px]" style={{ color: "var(--error)", background: "color-mix(in srgb, var(--error) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--error) 35%, transparent)" }}>
+                  <div className="flex items-center gap-2 font-medium">
+                    <span>⚠</span>
+                    <span>Results differ — the optimized query may not be equivalent to the original.</span>
+                  </div>
+                  <div className="mt-1 pl-5">{resultsComparison.reason}</div>
+                  {resultsComparison.mismatchExamples.length > 0 && (
+                    <div className="mt-2 pl-5 space-y-1 font-mono text-[10px] opacity-90">
+                      {resultsComparison.mismatchExamples.map((ex, i) => (
+                        <div key={i}>{ex}</div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-1 pl-5 text-[10px] opacity-75">
+                    Checked at {formatRows(dataVolume)} rows — original: {resultsComparison.originalColumns.join(", ") || "—"} · optimized: {resultsComparison.optimizedColumns.join(", ") || "—"}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
