@@ -31,8 +31,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { sql, schema, explainPlan } = parsed.data;
-    const result = await analyzeQuery(sql, schema, explainPlan);
+    const { sql, schema, explainPlan, feedback } = parsed.data;
+    const result = await analyzeQuery(sql, schema, explainPlan, feedback);
 
     return NextResponse.json(result);
   } catch (err) {

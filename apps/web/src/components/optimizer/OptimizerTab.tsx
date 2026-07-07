@@ -39,6 +39,9 @@ export function OptimizerTab() {
     setVerifyLoading,
     verifyError,
     setVerifyError,
+    reoptimizeTrigger,
+    reoptimizeFeedback,
+    setAiReoptimizeAttempts,
   } = useStore();
 
   // Snapshot of the query as it was when "Optimize with AI" was last clicked.
@@ -78,8 +81,15 @@ export function OptimizerTab() {
   }, [verifyResult, aiResult]);
 
   // ── Run AI Analysis ──
-  const runOptimize = useCallback(async () => {
+  // `feedback`, when present, is the measured (real SQLite execution)
+  // mismatch reason from a previous optimized_sql that the Performance tab
+  // proved wrong — see requestAiReoptimize in the store. Any call WITHOUT
+  // feedback is treated as a fresh, deliberate run (the user clicking
+  // "Optimize with AI" themselves) and resets the retry counter.
+  const runOptimize = useCallback(async (feedback?: string) => {
     if (!aiSQL.trim() || aiLoading) return;
+
+    if (!feedback) setAiReoptimizeAttempts(0);
 
     setSubmittedSQL(aiSQL);
     setAiLoading(true);
@@ -100,6 +110,7 @@ export function OptimizerTab() {
           sql: aiSQL,
           schema,
           explainPlan: explain.summary,
+          feedback,
         }),
       });
 
@@ -116,7 +127,19 @@ export function OptimizerTab() {
     } finally {
       setAiLoading(false);
     }
-  }, [aiSQL, tableData, aiLoading, setAiLoading, setAiError, setAiResult, setAiAnalyzedSQL, setVerifyResult, setVerifyError]);
+  }, [aiSQL, tableData, aiLoading, setAiLoading, setAiError, setAiResult, setAiAnalyzedSQL, setVerifyResult, setVerifyError, setAiReoptimizeAttempts]);
+
+  // Fired by the Performance tab's "Re-optimize with AI" button (via
+  // requestAiReoptimize, which also points aiSQL at the original query).
+  // Same "trigger counter" pattern as demoTrigger below — bumping the
+  // counter is the signal, not the value itself.
+  const lastReoptimizeTrigger = useRef(0);
+  useEffect(() => {
+    if (reoptimizeTrigger > lastReoptimizeTrigger.current) {
+      lastReoptimizeTrigger.current = reoptimizeTrigger;
+      runOptimize(reoptimizeFeedback ?? undefined);
+    }
+  }, [reoptimizeTrigger, reoptimizeFeedback, runOptimize]);
 
   // ── Apply & Verify Indexes ──
   const runVerify = useCallback(async () => {
@@ -194,7 +217,7 @@ export function OptimizerTab() {
               Query to Optimize
             </h3>
             <button
-              onClick={runOptimize}
+              onClick={() => runOptimize()}
               disabled={aiLoading || !aiSQL.trim()}
               className="btn-primary"
             >
@@ -336,7 +359,7 @@ export function OptimizerTab() {
                 and the verify results all live here so the header/button
                 and the card's colored top border never move. */}
             <div className="flex-1 min-h-0 overflow-y-auto mt-3 -mr-2 pr-2">
-              <OptimizerResult result={aiResult} onReanalyze={runOptimize} isReanalyzing={aiLoading} />
+              <OptimizerResult result={aiResult} onReanalyze={() => runOptimize()} isReanalyzing={aiLoading} />
 
               {/* Verify Results */}
               <div ref={verifySectionRef} className="flex flex-col gap-5 mt-6">

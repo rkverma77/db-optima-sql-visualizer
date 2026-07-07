@@ -4,6 +4,10 @@ export const AnalyzeRequestSchema = z.object({
   sql: z.string().min(1, "SQL is required").max(10_000),
   schema: z.string().min(1, "Schema is required"),
   explainPlan: z.string().max(4_000).optional(),
+  // Present only on a re-optimize retry: the measured (real SQLite
+  // execution) mismatch reason from a previous, empirically-wrong
+  // optimized_sql — see PerformanceTab's "Re-optimize with AI" flow.
+  feedback: z.string().max(4_000).optional(),
 });
 
 export const SaveQueryRequestSchema = z.object({

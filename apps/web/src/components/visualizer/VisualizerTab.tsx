@@ -2,7 +2,7 @@
 
 import { SQLEditor } from "@/components/ui/SQLEditor";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useStore } from "@/store/useStore";
 import { parsePipeline, prefixRows, nestedLoopJoin, highlightSQL } from "@/lib/sql/engine";
 import { runQuery } from "@/lib/sql/runner";
@@ -51,6 +51,19 @@ export function VisualizerTab() {
       return next;
     });
   };
+
+  // `frames`/`highlightedRows` are local component state — they're not part
+  // of the store, so loadDataset() (which resets queryResult, pipeline,
+  // etc.) has no way to clear them. Without this, switching the sample
+  // dataset left the last run's animation tables on screen even though
+  // they belonged to the previous dataset. tableData's reference changes on
+  // any dataset swap, CSV import, schema import, or manual row/col edit, so
+  // this keeps the visualization in sync with whatever data is actually
+  // loaded.
+  useEffect(() => {
+    setFrames([]);
+    setHighlightedRows({});
+  }, [tableData]);
 
   const run = useCallback(async () => {
     if (isRunning) return;

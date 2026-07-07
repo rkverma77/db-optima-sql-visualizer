@@ -1,6 +1,7 @@
 "use client";
 
 import { useStore } from "@/store/useStore";
+import { useTab } from "@/components/ui/Header";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -23,6 +24,11 @@ function formatRows(n: number) {
 
 const ALL_VOLUMES = [1_000, 5_000, 10_000, 25_000, 50_000, 100_000];
 const MAX_VOLUME = 100_000;
+// After this many consecutive AI re-optimize rounds still fail the measured
+// results check, stop offering another automatic retry — the AI is likely
+// stuck making the same category of mistake, and burning more Gemini calls
+// won't help. Point the user at manual editing instead.
+const MAX_AI_REOPTIMIZE_ATTEMPTS = 3;
 
 // ── Complexity Analyzer ───────────────────────────────────────
 function analyzeComplexity(sql: string): {
@@ -123,8 +129,11 @@ export function PerformanceTab() {
     dataVolume, setDataVolume, tableData,
     perfOriginalSQL, setPerfOriginalSQL,
     perfOptimizedSQL, setPerfOptimizedSQL,
+    perfOptimizedSource, sendAiResultToPerformance,
+    aiReoptimizeAttempts, requestAiReoptimize,
     aiResult,
   } = useStore();
+  const { setTab } = useTab();
 
   const [allBenchmarks, setAllBenchmarks] = useState<PerfDataPoint[]>([]);
   const [isComputing, setIsComputing] = useState(false);
@@ -348,6 +357,31 @@ export function PerformanceTab() {
     setAwaitingQueryEdit(false);
   }, [perfOriginalSQL, perfOptimizedSQL, tableData, indexDdl]);
 
+  // Only offer an automatic AI retry when Editor B's contents actually came
+  // from the AI Optimizer (see perfOptimizedSource) — a hand-written query
+  // that mismatches has no "previous AI attempt" to send back to Gemini.
+  const canAiReoptimize = perfOptimizedSource === "ai" && aiReoptimizeAttempts < MAX_AI_REOPTIMIZE_ATTEMPTS;
+
+  // Builds the empirical mismatch evidence and sends it back to the AI
+  // Optimizer as a retry, then jumps to that tab so the person sees the
+  // new attempt land. This is a real Gemini call, not a client-side guess —
+  // so it's only ever reachable when the current optimized query actually
+  // is the AI's own output (see canAiReoptimize).
+  const reoptimizeWithAi = useCallback(() => {
+    if (!resultsComparison || resultsComparison.matches) return;
+    const feedback = [
+      `Previous optimized_sql attempt: ${perfOptimizedSQL}`,
+      `Measured mismatch: ${resultsComparison.reason ?? "results differ"}`,
+      `Original row count: ${resultsComparison.originalRowCount} vs optimized row count: ${resultsComparison.optimizedRowCount}`,
+      `Original columns: [${resultsComparison.originalColumns.join(", ")}] vs optimized columns: [${resultsComparison.optimizedColumns.join(", ")}]`,
+      ...(resultsComparison.mismatchExamples.length
+        ? [`Example value mismatches: ${resultsComparison.mismatchExamples.join(" | ")}`]
+        : []),
+    ].join("\n");
+    requestAiReoptimize(feedback);
+    setTab("ai");
+  }, [resultsComparison, perfOptimizedSQL, requestAiReoptimize, setTab]);
+
   const chartData = useMemo(() => {
     return allBenchmarks
       .filter((p) => p.rows <= dataVolume)
@@ -422,7 +456,7 @@ export function PerformanceTab() {
               value={perfOriginalSQL}
               onChange={setPerfOriginalSQL}
               placeholder="Paste a SQL query to benchmark…"
-              minHeight={170}
+              minHeight={340}
             />
             <div className="flex items-center gap-3 mt-2 text-[11px] text-[var(--muted)]">
               <span>{perfOriginalSQL.trim().split(/\s+/).filter(Boolean).length} tokens</span>
@@ -441,9 +475,10 @@ export function PerformanceTab() {
               <div className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">Optimized Query</div>
               {canUseAiSuggestion && (
                 <button
-                  onClick={() => setPerfOptimizedSQL(aiResult!.optimized_sql)}
+                  onClick={sendAiResultToPerformance}
                   className="text-[10px] px-2 py-0.5 rounded-full border"
                   style={{ color: "var(--success)", borderColor: "color-mix(in srgb, var(--success) 40%, transparent)", background: "color-mix(in srgb, var(--success) 8%, transparent)" }}
+                  title="Fills in BOTH editors — the exact query the AI analyzed, and its optimized rewrite — so they're always a matching pair."
                 >
                   ↓ Use AI Optimizer&apos;s suggestion
                 </button>
@@ -453,7 +488,7 @@ export function PerformanceTab() {
               value={perfOptimizedSQL}
               onChange={setPerfOptimizedSQL}
               placeholder="Paste your own optimized query, or run AI Optimizer and click 'Use AI suggestion' to fill this in."
-              minHeight={170}
+              minHeight={340}
             />
             <div className="flex items-center gap-3 mt-2 text-[11px] text-[var(--muted)]">
               <span>{perfOptimizedSQL.trim().split(/\s+/).filter(Boolean).length} tokens</span>
@@ -493,23 +528,23 @@ export function PerformanceTab() {
 
       {/* ── Compute Button / Status ── */}
       {!hasComputed && (
-        <div className="card card-accent-amber p-6 flex flex-col items-center justify-center text-center gap-4 min-h-[300px]">
-          <div className="w-16 h-16 rounded-full bg-[var(--surface3)] flex items-center justify-center">
-            <svg className="w-8 h-8 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="card card-accent-amber p-4 flex flex-col items-center justify-center text-center gap-2.5 min-h-[160px]">
+          <div className="w-9 h-9 rounded-full bg-[var(--surface3)] flex items-center justify-center">
+            <svg className="w-5 h-5 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
           </div>
 
           <div>
-            <h3 className="text-lg font-semibold mb-1">Performance Benchmark</h3>
-            <p className="text-sm text-[var(--muted)] max-w-md">
+            <h3 className="text-sm font-semibold mb-0.5">Performance Benchmark</h3>
+            <p className="text-xs text-[var(--muted)] max-w-md">
               Run both queries across {ALL_VOLUMES.length} volume points (1K → 100K rows) against identical synthetic data to generate comparison curves.
             </p>
           </div>
 
           {awaitingQueryEdit && (
             <div
-              className="flex items-center gap-2 text-[12px] px-4 py-2 rounded-lg font-medium"
+              className="flex items-center gap-2 text-[11px] px-3 py-1 rounded-lg font-medium"
               style={{ color: "var(--accent)", borderColor: "color-mix(in srgb, var(--accent) 45%, transparent)", background: "color-mix(in srgb, var(--accent) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--accent) 45%, transparent)" }}
             >
               <span>✎</span>
@@ -519,31 +554,33 @@ export function PerformanceTab() {
             </div>
           )}
 
-          <div
-            className="flex items-center gap-2 text-[11px] px-3 py-1.5 rounded-full border"
-            style={{ color: "var(--success)", borderColor: "color-mix(in srgb, var(--success) 35%, transparent)", background: "color-mix(in srgb, var(--success) 8%, transparent)" }}
-          >
-            <span>●</span>
-            <span>Every number below comes from a real SQLite (WASM) engine actually running your queries — not a simulation or an estimate.</span>
-          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <div
+              className="flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full border"
+              style={{ color: "var(--success)", borderColor: "color-mix(in srgb, var(--success) 35%, transparent)", background: "color-mix(in srgb, var(--success) 8%, transparent)" }}
+            >
+              <span>●</span>
+              <span>Every number below comes from a real SQLite (WASM) engine actually running your queries — not a simulation or an estimate.</span>
+            </div>
 
-          <div
-            className="flex items-center gap-2 text-[11px] px-3 py-1.5 rounded-full border"
-            style={{ color: "var(--muted)", borderColor: "var(--border)", background: "var(--surface3)" }}
-          >
-            <span>⏱</span>
-            <span>If a run takes longer than 4s, larger volumes are skipped automatically for that query — and you can cancel at any time.</span>
+            <div
+              className="flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full border"
+              style={{ color: "var(--muted)", borderColor: "var(--border)", background: "var(--surface3)" }}
+            >
+              <span>⏱</span>
+              <span>If a run takes longer than 4s, larger volumes are skipped automatically for that query — and you can cancel at any time.</span>
+            </div>
           </div>
 
           {complexity.factors.includes("Subquery") && !isComputing && (
-            <div className="text-[11px] px-3 py-1.5 rounded-lg" style={{ color: "var(--warning)", background: "color-mix(in srgb, var(--warning) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--warning) 35%, transparent)" }}>
+            <div className="text-[10px] px-3 py-1 rounded-lg" style={{ color: "var(--warning)", background: "color-mix(in srgb, var(--warning) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--warning) 35%, transparent)" }}>
               ⚠ The original query uses subqueries in the SELECT list. SQLite re-runs a correlated subquery once per outer row, so cost grows much faster than a JOIN as row counts increase — this benchmark may hit the time budget above and stop early at a smaller volume.
             </div>
           )}
 
           {!isComputing && (
             <div
-              className="flex items-center gap-2 text-[12px] px-3 py-1.5 rounded-full border font-medium"
+              className="flex items-center gap-1.5 text-[11px] px-3 py-1 rounded-full border font-medium"
               style={{ color: "var(--error)", borderColor: "color-mix(in srgb, var(--error) 45%, transparent)", background: "var(--error-soft)" }}
             >
               <span>⚠</span>
@@ -613,16 +650,33 @@ export function PerformanceTab() {
                       <span>⚠</span>
                       <span>Results differ — the optimized query may not be equivalent to the original.</span>
                     </div>
-                    <button
-                      onClick={reanalyze}
-                      disabled={isComputing}
-                      className="shrink-0 text-[11px] px-3 py-1 rounded-lg border font-medium"
-                      style={{ color: "var(--error)", borderColor: "color-mix(in srgb, var(--error) 45%, transparent)", background: "color-mix(in srgb, var(--error) 12%, transparent)" }}
-                      title="Go back to the editors so you can fix the optimized query, then re-run the benchmark."
-                    >
-                      ↻ Recheck Optimized Query & Re-analyze
-                    </button>
+                    {canAiReoptimize ? (
+                      <button
+                        onClick={reoptimizeWithAi}
+                        disabled={isComputing}
+                        className="shrink-0 text-[11px] px-3 py-1 rounded-lg border font-medium"
+                        style={{ color: "var(--error)", borderColor: "color-mix(in srgb, var(--error) 45%, transparent)", background: "color-mix(in srgb, var(--error) 12%, transparent)" }}
+                        title="Sends this exact mismatch (measured against real SQLite execution) back to the AI Optimizer and asks it to correct the rewrite."
+                      >
+                        ↻ Re-optimize with AI ({aiReoptimizeAttempts}/{MAX_AI_REOPTIMIZE_ATTEMPTS})
+                      </button>
+                    ) : (
+                      <button
+                        onClick={reanalyze}
+                        disabled={isComputing}
+                        className="shrink-0 text-[11px] px-3 py-1 rounded-lg border font-medium"
+                        style={{ color: "var(--error)", borderColor: "color-mix(in srgb, var(--error) 45%, transparent)", background: "color-mix(in srgb, var(--error) 12%, transparent)" }}
+                        title="Go back to the editors so you can fix the optimized query, then re-run the benchmark."
+                      >
+                        ↻ Recheck Optimized Query & Re-analyze
+                      </button>
+                    )}
                   </div>
+                  {perfOptimizedSource === "ai" && !canAiReoptimize && (
+                    <div className="mt-1 pl-5 opacity-90">
+                      AI couldn&apos;t produce a verified-equivalent rewrite after {MAX_AI_REOPTIMIZE_ATTEMPTS} attempts — try adjusting the optimized query manually instead.
+                    </div>
+                  )}
                   <div className="mt-1 pl-5">{resultsComparison.reason}</div>
                   {resultsComparison.mismatchExamples.length > 0 && (
                     <div className="mt-2 pl-5 space-y-1 font-mono text-[10px] opacity-90">

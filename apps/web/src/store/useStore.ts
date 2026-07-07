@@ -67,6 +67,35 @@ interface AppState {
   perfOptimizedSQL: string;
   setPerfOptimizedSQL: (sql: string) => void;
 
+  // Where Editor B's current contents came from — drives which recovery
+  // action the Performance tab's "results differ" banner offers. Typing
+  // directly into the editor (or pasting) always means "manual"; only the
+  // explicit "Use AI Optimizer's suggestion" action marks it "ai", since
+  // that's the one case where a real Gemini call can retry the rewrite.
+  perfOptimizedSource: "ai" | "manual";
+  setPerfOptimizedSource: (s: "ai" | "manual") => void;
+  // Pulls both the query AI actually analyzed AND its suggested rewrite
+  // into the Performance tab together, so the two editors can never end up
+  // holding an unrelated pair (the bug where Editor A silently kept a
+  // stale/default query while Editor B got the AI's rewrite for a
+  // different query).
+  sendAiResultToPerformance: () => void;
+
+  // Tracks how many times the AI has been asked to re-optimize *this same*
+  // query after a measured (real SQLite execution) mismatch — as opposed to
+  // its own self-reported equivalence check. Resets on any fresh, manual
+  // "Optimize with AI" click. Capped in the UI so a stubborn bad rewrite
+  // doesn't loop forever.
+  aiReoptimizeAttempts: number;
+  setAiReoptimizeAttempts: (n: number) => void;
+  // Feedback text (built from the Performance tab's measured mismatch)
+  // sent back to Gemini on a re-optimize request, plus a trigger counter
+  // OptimizerTab watches to know when to actually fire the re-analysis —
+  // same pattern as demoTrigger below.
+  reoptimizeFeedback: string | null;
+  reoptimizeTrigger: number;
+  requestAiReoptimize: (feedback: string) => void;
+
   dataVolume: number;
   setDataVolume: (v: number) => void;
 
@@ -219,7 +248,37 @@ AND o.quantity > 1`,
   setPerfOriginalSQL: (sql) => set({ perfOriginalSQL: sql }),
 
   perfOptimizedSQL: "",
-  setPerfOptimizedSQL: (sql) => set({ perfOptimizedSQL: sql }),
+  // Manual edits to Editor B always demote the source back to "manual" —
+  // even if it currently holds an AI rewrite, the moment the user changes
+  // it by hand it's no longer something Gemini can meaningfully "retry".
+  setPerfOptimizedSQL: (sql) => set({ perfOptimizedSQL: sql, perfOptimizedSource: "manual" }),
+
+  perfOptimizedSource: "manual",
+  setPerfOptimizedSource: (s) => set({ perfOptimizedSource: s }),
+
+  sendAiResultToPerformance: () =>
+    set((s) => {
+      if (!s.aiResult?.optimized_sql) return s;
+      return {
+        perfOriginalSQL: s.aiAnalyzedSQL ?? s.aiSQL,
+        perfOptimizedSQL: s.aiResult.optimized_sql,
+        perfOptimizedSource: "ai",
+        aiReoptimizeAttempts: 0,
+      };
+    }),
+
+  aiReoptimizeAttempts: 0,
+  setAiReoptimizeAttempts: (n) => set({ aiReoptimizeAttempts: n }),
+
+  reoptimizeFeedback: null,
+  reoptimizeTrigger: 0,
+  requestAiReoptimize: (feedback) =>
+    set((s) => ({
+      aiSQL: s.perfOriginalSQL,
+      reoptimizeFeedback: feedback,
+      reoptimizeTrigger: s.reoptimizeTrigger + 1,
+      aiReoptimizeAttempts: s.aiReoptimizeAttempts + 1,
+    })),
 
   dataVolume: 10_000,
   setDataVolume: (v) => set({ dataVolume: v }),
@@ -239,6 +298,8 @@ AND o.quantity > 1`,
       visualizerSQL: SAMPLE_DATASETS[key].query,
       perfOriginalSQL: SAMPLE_DATASETS[key].query,
       perfOptimizedSQL: "",
+      perfOptimizedSource: "manual",
+      aiReoptimizeAttempts: 0,
       queryResult: null,
       pipeline: [],
       aiResult: null,
