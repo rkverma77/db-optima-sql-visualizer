@@ -20,6 +20,7 @@ interface AppState {
   dropColumn: (table: string, col: string) => void;
   updateCell: (table: string, row: number, col: string, value: string | number | null) => void;
   renameColumn: (table: string, oldName: string, newName: string) => void;
+  renameTable: (oldName: string, newName: string) => void;
 
   visualizerSQL: string;
   setVisualizerSQL: (sql: string) => void;
@@ -116,8 +117,6 @@ interface AppState {
   setSavedQueryId: (id: string | null) => void;
   setSaveError: (msg: string | null) => void;
 
-  demoTrigger: number;
-  runDemo: () => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -126,7 +125,7 @@ export const useStore = create<AppState>((set) => ({
 
   addTable: (name) =>
     set((s) => ({
-      tableData: { ...s.tableData, [name]: [{ id: 1 }] },
+      tableData: { [name]: [{ id: 1 }], ...s.tableData },
     })),
 
   dropTable: (name) =>
@@ -194,12 +193,31 @@ export const useStore = create<AppState>((set) => ({
     set((s) => {
       if (!newName || oldName === newName) return s;
       const rows = s.tableData[table].map((r) => {
-        const n = { ...r };
-        n[newName] = n[oldName];
-        delete n[oldName];
-        return n;
+        const newRow: Record<string, string | number | null> = {};
+        for (const key of Object.keys(r)) {
+          if (key === oldName) {
+            newRow[newName] = r[oldName];
+          } else {
+            newRow[key] = r[key];
+          }
+        }
+        return newRow;
       });
       return { tableData: { ...s.tableData, [table]: rows } };
+    }),
+
+  renameTable: (oldName, newName) =>
+    set((s) => {
+      if (!newName || oldName === newName || s.tableData[newName]) return s;
+      const newTableData: TableData = {};
+      for (const key of Object.keys(s.tableData)) {
+        if (key === oldName) {
+          newTableData[newName] = s.tableData[oldName];
+        } else {
+          newTableData[key] = s.tableData[key];
+        }
+      }
+      return { tableData: newTableData };
     }),
 
   visualizerSQL: SAMPLE_DATASETS.salesPipeline.query,
@@ -313,15 +331,4 @@ AND o.quantity > 1`,
   setSaveStatus: (s) => set({ saveStatus: s }),
   setSavedQueryId: (id) => set({ savedQueryId: id }),
   setSaveError: (msg) => set({ saveError: msg }),
-
-  demoTrigger: 0,
-  runDemo: () =>
-    set((s) => ({
-      aiSQL: `SELECT *\nFROM Orders o, Customers c\nWHERE o.customer_id = c.id\nAND o.quantity > 1`,
-      aiResult: null,
-      aiAnalyzedSQL: null,
-      aiError: null,
-      verifyResult: null,
-      demoTrigger: s.demoTrigger + 1,
-    })),
 }));

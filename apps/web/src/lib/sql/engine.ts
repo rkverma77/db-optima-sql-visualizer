@@ -11,200 +11,141 @@ export function buildSchemaString(data: TableData): string {
 }
 
 // ── SQL Pipeline Parser ───────────────────────────────────────
+import { Parser } from "node-sql-parser";
+
 /**
- * Parses a SELECT statement into logical execution steps.
- * Supports FROM, one or more JOINs, WHERE, SELECT.
+ * Parses a SELECT statement into logical execution steps using an AST.
+ * Supports FROM, one or more JOINs, WHERE, SELECT, CTEs, Aggregations, and Window Functions.
  */
+function extractSubqueries(obj: any, steps: PipelineStep[]) {
+  if (!obj || typeof obj !== "object") return;
+  
+  if (obj.ast && obj.ast.type === "select") {
+    const subAST = obj.ast;
+    if (subAST.from && Array.isArray(subAST.from)) {
+      for (const f of subAST.from) {
+        const tblName = f.table || (f.as || "subquery");
+        steps.push({ type: "SUBQUERY", table: tblName, alias: f.as || tblName, status: "pending" });
+      }
+    }
+  }
+
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      extractSubqueries(obj[key], steps);
+    }
+  }
+}
+
+function extractCTEBody(sql: string, cteName: string): string {
+  const regex = new RegExp(`\\b${cteName}\\s+AS\\s*\\(`, "i");
+  const match = sql.match(regex);
+  if (!match) return "";
+  
+  const startIndex = match.index! + match[0].length;
+  let openParens = 1;
+  let i = startIndex;
+  for (; i < sql.length; i++) {
+      if (sql[i] === '(') openParens++;
+      else if (sql[i] === ')') openParens--;
+      
+      if (openParens === 0) break;
+  }
+  return sql.substring(startIndex, i).trim();
+}
+
 export function parsePipeline(sql: string): PipelineStep[] {
-  const tokens = sql.replace(/[\n\t]/g, " ").split(/\s+/).filter(Boolean);
+  const parser = new Parser();
+  let ast: any;
+  try {
+    ast = parser.astify(sql);
+  } catch (e) {
+    // Fallback if parsing fails
+    // Extract FROM tables via regex so we can show something
+    const fallbackTables = [...new Set(Array.from(sql.matchAll(/FROM\s+([a-zA-Z0-9_]+)/gi)).map(m => m[1]))];
+    return [
+      { type: "COMPLEX", status: "pending", tables: fallbackTables.length > 0 ? fallbackTables : [] },
+      { type: "SELECT", status: "pending" }
+    ];
+  }
+
+  if (Array.isArray(ast)) ast = ast[0];
+
   const steps: PipelineStep[] = [];
 
-  // A plain `tokens.findIndex("FROM")` would match the FROM *inside* a
-  // scalar subquery in the SELECT list (e.g. `(SELECT x FROM Y)`) rather
-  // than the query's real top-level FROM, since that subquery's FROM
-  // simply comes first in the token stream. Find the top-level one by
-  // tracking paren depth over the raw SQL and only accepting a FROM seen
-  // at depth 0, then translate that character offset back to a token index.
-  const fi = findTopLevelFromTokenIndex(sql, tokens);
-  if (fi === -1) return [];
-
-  // ── FROM clause ──
-  const baseTbl = tokens[fi + 1];
-  let pos = fi + 2;
-  let baseAlias = baseTbl;
-
-  if (tokens[pos]?.toUpperCase() === "AS") {
-    baseAlias = tokens[pos + 1] ?? baseTbl;
-    pos += 2;
-  } else if (tokens[pos] && !isClauseKeyword(tokens[pos])) {
-    baseAlias = tokens[pos];
-    pos++;
+  if (ast.with && Array.isArray(ast.with)) {
+    for (const cte of ast.with) {
+      let fragment = "";
+      try {
+        fragment = parser.sqlify(cte.stmt.ast ? cte.stmt.ast : cte.stmt);
+      } catch (e) {
+        fragment = extractCTEBody(sql, cte.name.value);
+      }
+      steps.push({ type: "CTE", table: cte.name.value, alias: cte.name.value, queryFragment: fragment, status: "pending" });
+    }
   }
 
-  steps.push({ type: "FROM", table: baseTbl, alias: baseAlias, status: "pending" });
-
-  // ── JOIN / WHERE / etc. ──
-  while (pos < tokens.length) {
-    const w = tokens[pos].toUpperCase();
-
-    // JOIN detection
-    if (w === "JOIN" || (isJoinModifier(w) && tokens[pos + 1]?.toUpperCase() === "JOIN")) {
-      const offset = w === "JOIN" ? 1 : 2;
-      const jTbl = tokens[pos + offset];
-      let jAlias = jTbl;
-      let afterTable = pos + offset + 1;
-
-      if (tokens[afterTable]?.toUpperCase() === "AS") {
-        jAlias = tokens[afterTable + 1] ?? jTbl;
-        afterTable += 2;
-      } else if (tokens[afterTable] && !isClauseKeyword(tokens[afterTable]) && tokens[afterTable].toUpperCase() !== "ON") {
-        jAlias = tokens[afterTable];
-        afterTable++;
-      }
-
-      // Find ON that belongs to THIS join (before next JOIN or WHERE)
-      let onIdx = -1;
-      for (let j = afterTable; j < tokens.length; j++) {
-        const t = tokens[j].toUpperCase();
-        if (t === "ON") { onIdx = j; break; }
-        if (isClauseKeyword(t) && t !== "ON") break;
-      }
-
-      let leftKey = "", rightKey = "";
-      if (onIdx !== -1) {
-        const clauseEnd = findNextClause(tokens, onIdx);
-        const eqIdx = tokens.findIndex((t, idx) => idx > onIdx && idx < clauseEnd && t === "=");
-        if (eqIdx !== -1) {
-          leftKey = tokens[eqIdx - 1] ?? "";
-          rightKey = tokens[eqIdx + 1] ?? "";
+  if (ast.from && Array.isArray(ast.from)) {
+    // Pre-evaluate subqueries in FROM clause as if they were CTEs
+    for (let i = 0; i < ast.from.length; i++) {
+      const f = ast.from[i];
+      if (f.expr && f.expr.ast && f.expr.ast.type === "select") {
+        let fragment = "";
+        try {
+          fragment = parser.sqlify(f.expr.ast);
+        } catch (e) {}
+        if (fragment) {
+          const alias = f.as || `subquery_${i}`;
+          steps.push({ type: "CTE", table: alias, alias: alias, queryFragment: fragment, status: "pending" });
         }
       }
-
-      steps.push({ type: "JOIN", table: jTbl, alias: jAlias, leftKey, rightKey, status: "pending" });
-      if (offset === 2) pos++; // skip modifier (LEFT, RIGHT, etc.)
     }
 
-    // WHERE clause
-    if (w === "WHERE") {
-      const condEnd = findNextClause(tokens, pos);
-      const condition = tokens.slice(pos + 1, condEnd).join(" ");
-      steps.push({ type: "WHERE", condition, status: "pending" });
+    for (let i = 0; i < ast.from.length; i++) {
+      const f = ast.from[i];
+      // `table` might be null if it's a subquery, fallback to dual or subquery
+      const tblName = f.table || (f.as || "subquery");
+      if (i === 0) {
+        steps.push({ type: "FROM", table: tblName, alias: f.as || tblName, status: "pending" });
+      } else {
+        let leftKey = "", rightKey = "";
+        if (f.on && f.on.type === "binary_expr" && f.on.operator === "=") {
+          leftKey = f.on.left?.column || "";
+          rightKey = f.on.right?.column || "";
+        }
+        steps.push({ type: "JOIN", table: tblName, alias: f.as || tblName, leftKey, rightKey, status: "pending" });
+      }
     }
-
-    pos++;
   }
 
-  // ── Scalar subqueries in the SELECT list ──
-  // A query written with `(SELECT x FROM Y WHERE ...)` per column instead
-  // of a JOIN has no JOIN tokens at all, so without this the pipeline
-  // would jump straight from FROM/WHERE to the final result — technically
-  // correct (sql.js runs the whole statement in one shot either way) but
-  // it looks like the visualizer is skipping work. Surfacing each distinct
-  // table referenced by a subquery as its own step at least shows *where*
-  // the extra per-row lookups are happening, even though — unlike a JOIN —
-  // there's no two-table nested-loop match to animate row-by-row.
-  for (const table of findSubqueryTables(sql)) {
-    steps.push({ type: "SUBQUERY", table, alias: table, status: "pending" });
+  if (ast.where) {
+    steps.push({ type: "WHERE", condition: "Condition", status: "pending" });
+  }
+
+  if (ast.groupby) {
+    steps.push({ type: "AGGREGATE", status: "pending" });
+  }
+
+  // ── Extract Subqueries recursively ──
+  extractSubqueries(ast.columns, steps);
+  extractSubqueries(ast.where, steps);
+  extractSubqueries(ast.groupby, steps);
+
+  let hasWindow = false;
+  if (ast.columns) {
+    for (const col of ast.columns) {
+      // Detect window functions
+      if (col.expr && col.expr.over) {
+        hasWindow = true;
+      }
+    }
+  }
+  if (hasWindow) {
+    steps.push({ type: "WINDOW", status: "pending" });
   }
 
   steps.push({ type: "SELECT", status: "pending" });
   return steps;
-}
-
-/**
- * Finds the query's real top-level FROM — the one that isn't nested
- * inside a `(SELECT ... FROM ...)` subquery — and returns its index in
- * `tokens`. Falls back to a plain first-match if paren-tracking somehow
- * finds nothing (e.g. malformed SQL), so parsing degrades gracefully
- * rather than failing outright on unusual input.
- */
-function findTopLevelFromTokenIndex(sql: string, tokens: string[]): number {
-  const upper = sql.toUpperCase();
-  let depth = 0;
-  for (let i = 0; i < sql.length; i++) {
-    const ch = sql[i];
-    if (ch === "(") depth++;
-    else if (ch === ")") depth--;
-    else if (
-      depth === 0 &&
-      upper.slice(i, i + 4) === "FROM" &&
-      /\s/.test(sql[i - 1] ?? " ") &&
-      /\s/.test(sql[i + 4] ?? " ")
-    ) {
-      const prefixTokenCount = sql
-        .slice(0, i)
-        .replace(/[\n\t]/g, " ")
-        .split(/\s+/)
-        .filter(Boolean).length;
-      return prefixTokenCount;
-    }
-  }
-  return tokens.findIndex((w) => w.toUpperCase() === "FROM");
-}
-
-/**
- * Finds every table named in a `FROM` inside the SELECT list (i.e. before
- * the query's own top-level FROM), which is where scalar/correlated
- * subqueries live. Tracks paren depth so nested subqueries (a subquery
- * inside a subquery, e.g. looking up a category through a product lookup)
- * are still found, and stops once the top-level FROM is reached so the
- * query's main table(s) aren't double-counted as "subqueries".
- */
-function findSubqueryTables(sql: string): string[] {
-  const upper = sql.toUpperCase();
-  const selectIdx = upper.indexOf("SELECT");
-  if (selectIdx === -1) return [];
-
-  let depth = 0;
-  let selectListEnd = -1;
-  for (let i = selectIdx + 6; i < sql.length; i++) {
-    const ch = sql[i];
-    if (ch === "(") depth++;
-    else if (ch === ")") depth--;
-    else if (
-      depth === 0 &&
-      upper.slice(i, i + 4) === "FROM" &&
-      /\s/.test(sql[i - 1] ?? " ") &&
-      /\s/.test(sql[i + 4] ?? " ")
-    ) {
-      selectListEnd = i;
-      break;
-    }
-  }
-  if (selectListEnd === -1) return [];
-
-  const selectList = sql.slice(selectIdx + 6, selectListEnd);
-  const found: string[] = [];
-  const seen = new Set<string>();
-  const re = /\bFROM\s+([A-Za-z_][A-Za-z0-9_]*)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(selectList))) {
-    const tbl = m[1];
-    if (!seen.has(tbl)) {
-      seen.add(tbl);
-      found.push(tbl);
-    }
-  }
-  return found;
-}
-
-// ── Helpers ──
-function isJoinModifier(token: string): boolean {
-  return ["LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "FULL", "NATURAL"].includes(token.toUpperCase());
-}
-
-function isClauseKeyword(token: string): boolean {
-  return ["SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "FULL", "NATURAL", "ON", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET", "UNION", "EXCEPT", "INTERSECT"].includes(token.toUpperCase());
-}
-
-function findNextClause(tokens: string[], start: number): number {
-  for (let i = start + 1; i < tokens.length; i++) {
-    const t = tokens[i].toUpperCase();
-    if (["JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "FULL", "NATURAL", "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET", "UNION", "EXCEPT", "INTERSECT"].includes(t)) {
-      return i;
-    }
-  }
-  return tokens.length;
 }
 
 // ── Index suggestions from parsed JOIN keys + WHERE columns ──

@@ -10,16 +10,18 @@ export interface TableData {
 }
 
 // ── SQL Execution Pipeline ─────────────────────────────────────
-export type PipelineStepType = "FROM" | "JOIN" | "WHERE" | "SUBQUERY" | "SELECT";
+export type PipelineStepType = "FROM" | "JOIN" | "WHERE" | "SUBQUERY" | "COMPLEX" | "SELECT" | "CTE" | "AGGREGATE" | "WINDOW";
 export type PipelineStepStatus = "pending" | "active" | "done";
 
 export interface PipelineStep {
   type: PipelineStepType;
   table?: string;
   alias?: string;
+  tables?: string[];
   leftKey?: string;
   rightKey?: string;
   condition?: string;
+  queryFragment?: string;
   status: PipelineStepStatus;
 }
 

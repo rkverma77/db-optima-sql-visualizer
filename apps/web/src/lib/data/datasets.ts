@@ -231,6 +231,67 @@ ORDER BY i.id;`,
   },
 };
 
+// Reuse salesPipeline data for complex testing datasets to avoid massive duplication
+SAMPLE_DATASETS.salesAnalytics = {
+  label: "Sales Analytics Mastery",
+  description: "Advanced Multi-CTE, Window Functions, and Complex Joins",
+  query: `WITH CategorySales AS (
+  SELECT 
+    p.category_id,
+    SUM(o.quantity * p.price) as total_category_revenue
+  FROM Orders o
+  JOIN Products p ON o.product_id = p.id
+  GROUP BY p.category_id
+),
+RankedProducts AS (
+  SELECT 
+    p.id as product_id,
+    p.name,
+    p.category_id,
+    SUM(o.quantity * p.price) as product_revenue,
+    RANK() OVER(PARTITION BY p.category_id ORDER BY SUM(o.quantity * p.price) DESC) as cat_rank
+  FROM Orders o
+  JOIN Products p ON o.product_id = p.id
+  GROUP BY p.id, p.name, p.category_id
+)
+SELECT 
+  rp.name as top_product,
+  c.name as category,
+  rp.product_revenue,
+  cs.total_category_revenue,
+  ROUND((rp.product_revenue / NULLIF(cs.total_category_revenue, 0)) * 100, 2) as pct_of_category
+FROM RankedProducts rp
+JOIN CategorySales cs ON rp.category_id = cs.category_id
+JOIN Categories c ON rp.category_id = c.id
+WHERE rp.cat_rank = 1
+ORDER BY rp.product_revenue DESC;`,
+  data: SAMPLE_DATASETS.salesPipeline.data,
+};
+
+SAMPLE_DATASETS.customerCohorts = {
+  label: "Customer Cohort Retention",
+  description: "Complex Subqueries and Conditional Aggregations",
+  query: `SELECT 
+  c.country,
+  COUNT(DISTINCT c.id) as total_customers,
+  SUM(CASE WHEN sub.order_count > 1 THEN 1 ELSE 0 END) as returning_customers,
+  SUM(sub.total_spent) as country_revenue
+FROM Customers c
+JOIN (
+  SELECT 
+    customer_id,
+    COUNT(id) as order_count,
+    SUM(quantity * 100) as total_spent -- Approximate spend
+  FROM Orders
+  GROUP BY customer_id
+) sub ON c.id = sub.customer_id
+WHERE c.loyalty_points > 50
+GROUP BY c.country
+HAVING country_revenue > 0
+ORDER BY country_revenue DESC;`,
+  data: SAMPLE_DATASETS.salesPipeline.data,
+};
+
 // ── Synthetic data generator ────────────────────────────────────
 // Scales a base dataset up to N total rows (roughly, spread across
 // tables using the same proportions as the seed data), so the

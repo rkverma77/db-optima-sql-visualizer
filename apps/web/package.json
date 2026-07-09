@@ -16,9 +16,16 @@
     "@db-optima/types": "*",
     "@google/generative-ai": "^0.14.1",
     "@heroicons/react": "^2.2.0",
-    "lucide-react": "^1.23.0",
+    "@radix-ui/react-dialog": "^1.1.19",
+    "@radix-ui/react-select": "^2.3.3",
+    "@radix-ui/react-tabs": "^1.1.17",
+    "@radix-ui/react-toggle": "^1.1.14",
+    "@radix-ui/react-tooltip": "^1.2.12",
     "drizzle-orm": "^0.31.4",
+    "framer-motion": "^12.42.2",
+    "lucide-react": "^1.23.0",
     "next": "14.2.5",
+    "node-sql-parser": "^5.4.0",
     "prismjs": "^1.30.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -30,7 +37,7 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
-    "@types/node": "^20.14.11",
+    "@types/node": "^20.19.43",
     "@types/prismjs": "^1.26.6",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
@@ -40,7 +47,8 @@
     "eslint-config-next": "14.2.5",
     "postcss": "^8.4.40",
     "tailwindcss": "^3.4.6",
-    "typescript": "^5.5.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
     "vitest": "^2.1.9"
   }
 }

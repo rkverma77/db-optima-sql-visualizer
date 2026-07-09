@@ -69,7 +69,7 @@ Rules:
        subquery in the SELECT list with a JOIN changes NULL-vs-dropped-row semantics unless you
        use LEFT JOIN (the subquery form keeps the outer row and returns NULL on no match; INNER
        JOIN drops the row instead) — but treat this as one example of the procedure above, not
-       the only case worth checking.
+       the only case worth checking.+
   - Do not ship a rewrite you cannot verify. If you cannot find a rewrite that is both faster
     and provably equivalent, prefer a smaller, safer optimization (e.g. add indexes only, or
     convert only the parts you're sure about) over a bigger rewrite that changes behavior. As a
